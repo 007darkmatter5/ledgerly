@@ -1,4 +1,5 @@
 @inject LedgerService Ledger
+@inject IDialogService Dialogs
 
 <MudDialog>
     <DialogContent>
@@ -11,7 +12,19 @@
                     <MudTextField @bind-Value="Model.Payee" Label="Payee" Variant="Variant.Outlined" Margin="Margin.Dense" />
                 </MudItem>
                 <MudItem xs="12" sm="3">
-                    <MudAutocomplete T="string" @bind-Value="Model.Category" Label="Category" SearchFunc="SearchCategories" CoerceValue="true" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                    <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center">
+                        <MudSelect T="int?" @bind-Value="Model.CategoryId" Label="Category" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                   ToStringFunc="@(id => _categories.FirstOrDefault(c => c.Id == id)?.Name ?? "None")">
+                            <MudSelectItem T="int?" Value="null">None</MudSelectItem>
+                            @foreach (var category in _categories)
+                            {
+                                <MudSelectItem T="int?" Value="category.Id"><CategoryChip Category="category" /></MudSelectItem>
+                            }
+                        </MudSelect>
+                        <MudTooltip Text="New category">
+                            <MudIconButton Icon="@Icons.Material.Filled.Add" Size="Size.Small" OnClick="AddCategoryAsync" aria-label="New category" />
+                        </MudTooltip>
+                    </MudStack>
                 </MudItem>
 
                 <MudItem xs="12" sm="4">
@@ -99,9 +112,9 @@
 @code {
     [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = null!;
     [Parameter] public Bill Model { get; set; } = new();
-    [Parameter] public IReadOnlyCollection<string> Categories { get; set; } = [];
 
     private MudForm _form = null!;
+    private List<Category> _categories = [];
     private List<Account> _accounts = [];
     private List<Loan> _loans = [];
     private DateOnly? _startDate;
@@ -111,6 +124,7 @@
     {
         _startDate = Model.Id == 0 ? null : Model.StartDate;
         _endDate = Model.EndDate;
+        _categories = await Ledger.GetCategoriesAsync();
         _accounts = await Ledger.GetAccountsAsync(activeOnly: true);
         _loans = (await Ledger.GetLoansAsync()).Where(l => l.IsActive || l.Id == Model.LoanId).ToList();
 
@@ -118,8 +132,19 @@
             Model.PayFromAccountId = checking.Id;
     }
 
-    private Task<IEnumerable<string>> SearchCategories(string? text, CancellationToken _) =>
-        Task.FromResult(Categories.Where(c => string.IsNullOrWhiteSpace(text) || c.Contains(text, StringComparison.OrdinalIgnoreCase)));
+    private async Task AddCategoryAsync()
+    {
+        var parameters = new DialogParameters<CategoryDialog>
+        {
+            { d => d.Model, new Category { Color = CategoryChip.Palette[_categories.Count % CategoryChip.Palette.Length] } }
+        };
+        var dialog = await Dialogs.ShowAsync<CategoryDialog>("New category", parameters, new DialogOptions { MaxWidth = MaxWidth.ExtraSmall, FullWidth = true });
+        if (await dialog.Result is { Canceled: false, Data: int id })
+        {
+            _categories = await Ledger.GetCategoriesAsync();
+            Model.CategoryId = id;
+        }
+    }
 
     private string? ValidateMax(decimal? max) =>
         max is { } m && m < Model.ExpectedAmount ? "Must be at least the expected amount" : null;

@@ -1,0 +1,67 @@
+@inject LedgerService Ledger
+
+<MudDialog>
+    <DialogContent>
+        <MudTextField @bind-Value="Model.Name" Label="Name" MaxLength="50" Variant="Variant.Outlined" Margin="Margin.Dense" Immediate="true"
+                      Error="@(_error is not null)" ErrorText="@_error" autofocus OnKeyUp="OnKeyUpAsync" />
+
+        <MudText Typo="Typo.subtitle2" Class="mt-4 mb-2">Color</MudText>
+        <div class="d-flex flex-wrap gap-2" role="radiogroup" aria-label="Category color">
+            <button type="button" class="@SwatchClass(null)" role="radio" aria-checked="@(Model.Color is null)" aria-label="No color" title="No color"
+                    @onclick="() => Model.Color = null">
+                <MudIcon Icon="@Icons.Material.Filled.Block" Size="Size.Small" />
+            </button>
+            @foreach (var color in CategoryChip.Palette)
+            {
+                <button type="button" class="@SwatchClass(color)" style="background:@color" role="radio" aria-checked="@(Model.Color == color)" aria-label="@color" title="@color"
+                        @onclick="() => Model.Color = color">
+                    @if (Model.Color == color)
+                    {
+                        <MudIcon Icon="@Icons.Material.Filled.Check" Size="Size.Small" Style="color:#fff" />
+                    }
+                </button>
+            }
+        </div>
+
+        <MudText Typo="Typo.subtitle2" Class="mt-4 mb-1">Preview</MudText>
+        <CategoryChip Category="@(new Category { Name = string.IsNullOrWhiteSpace(Model.Name) ? "Category" : Model.Name, Color = Model.Color })" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => MudDialog.Cancel()">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveAsync" Disabled="_saving">Save</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = null!;
+    [Parameter] public Category Model { get; set; } = new();
+
+    private string? _error;
+    private bool _saving;
+
+    private string SwatchClass(string? color) => $"color-swatch{(Model.Color == color ? " selected" : "")}{(color is null ? " none" : "")}";
+
+    private async Task OnKeyUpAsync(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+            await SaveAsync();
+    }
+
+    private async Task SaveAsync()
+    {
+        _saving = true;
+        try
+        {
+            await Ledger.SaveCategoryAsync(Model);
+            MudDialog.Close(DialogResult.Ok(Model.Id));
+        }
+        catch (LedgerValidationException ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+}

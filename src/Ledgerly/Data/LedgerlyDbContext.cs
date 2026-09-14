@@ -6,6 +6,7 @@ namespace Ledgerly.Data;
 public class LedgerlyDbContext(DbContextOptions<LedgerlyDbContext> options) : IdentityDbContext<ApplicationUser>(options)
 {
     public DbSet<Ledger> Ledgers => Set<Ledger>();
+    public DbSet<Category> Categories => Set<Category>();
     public DbSet<Account> Accounts => Set<Account>();
     public DbSet<Bill> Bills => Set<Bill>();
     public DbSet<BillOccurrence> BillOccurrences => Set<BillOccurrence>();
@@ -32,6 +33,15 @@ public class LedgerlyDbContext(DbContextOptions<LedgerlyDbContext> options) : Id
             e.HasIndex(l => new { l.OwnerId, l.IsSample }).IsUnique();
         });
 
+        modelBuilder.Entity<Category>(e =>
+        {
+            // NOCASE so "Utilities" and "utilities" count as the same name.
+            e.Property(c => c.Name).HasMaxLength(50).UseCollation("NOCASE");
+            e.Property(c => c.Color).HasMaxLength(9);
+            e.HasIndex(c => new { c.LedgerId, c.Name }).IsUnique();
+            e.HasOne<Ledger>().WithMany().HasForeignKey(c => c.LedgerId).OnDelete(DeleteBehavior.Cascade);
+        });
+
         modelBuilder.Entity<Account>(e =>
         {
             e.Property(a => a.Name).HasMaxLength(100);
@@ -46,6 +56,7 @@ public class LedgerlyDbContext(DbContextOptions<LedgerlyDbContext> options) : Id
             e.Property(b => b.LoanPaymentKind).HasConversion<string>().HasMaxLength(20);
             e.HasOne<Ledger>().WithMany().HasForeignKey(b => b.LedgerId).OnDelete(DeleteBehavior.Cascade);
             e.HasOne(b => b.PayFromAccount).WithMany().OnDelete(DeleteBehavior.SetNull);
+            e.HasOne(b => b.Category).WithMany().OnDelete(DeleteBehavior.SetNull);
             e.HasOne(b => b.Loan).WithMany().OnDelete(DeleteBehavior.SetNull);
             e.HasMany(b => b.Occurrences).WithOne(o => o.Bill).OnDelete(DeleteBehavior.Cascade);
         });

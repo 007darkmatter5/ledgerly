@@ -113,6 +113,70 @@ public sealed class LedgerServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Categories_are_private_unique_per_ledger_and_trimmed()
+    {
+        var alice = ServiceFor("alice");
+        var utilities = new Category { Name = "  Utilities ", Color = "#F39C12" };
+        await alice.SaveCategoryAsync(utilities);
+
+        Assert.Equal("Utilities", utilities.Name);
+        await Assert.ThrowsAsync<LedgerValidationException>(() => alice.SaveCategoryAsync(new Category { Name = "utilities" }));
+        await Assert.ThrowsAsync<LedgerValidationException>(() => alice.SaveCategoryAsync(new Category { Name = "   " }));
+
+        // Renaming a category to its own name (different case) is fine.
+        utilities.Name = "UTILITIES";
+        await alice.SaveCategoryAsync(utilities);
+
+        // Another user can have a category with the same name, and can't see or edit Alice's.
+        var bob = ServiceFor("bob");
+        await bob.SaveCategoryAsync(new Category { Name = "Utilities" });
+        Assert.Equal(["Utilities"], (await bob.GetCategoriesAsync()).Select(c => c.Name));
+        var hijack = utilities.Copy();
+        hijack.Name = "Hacked";
+        await Assert.ThrowsAsync<InvalidOperationException>(() => bob.SaveCategoryAsync(hijack));
+        Assert.Equal(["UTILITIES"], (await ServiceFor("alice").GetCategoriesAsync()).Select(c => c.Name));
+    }
+
+    [Fact]
+    public async Task Deleting_a_category_keeps_its_bills_uncategorized()
+    {
+        var alice = ServiceFor("alice");
+        var housing = new Category { Name = "Housing" };
+        await alice.SaveCategoryAsync(housing);
+        await alice.SaveBillAsync(new Bill { Name = "Rent", ExpectedAmount = 900m, StartDate = new DateOnly(2026, 9, 1), CategoryId = housing.Id });
+
+        Assert.Equal("Housing", Assert.Single(await alice.GetBillsAsync()).Category?.Name);
+
+        await alice.DeleteCategoryAsync(housing.Id);
+
+        var bill = Assert.Single(await alice.GetBillsAsync());
+        Assert.Null(bill.CategoryId);
+        Assert.Empty(await alice.GetCategoriesAsync());
+    }
+
+    [Fact]
+    public async Task Users_cannot_file_a_bill_under_another_users_category()
+    {
+        var aliceCategory = new Category { Name = "Secret" };
+        await ServiceFor("alice").SaveCategoryAsync(aliceCategory);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => ServiceFor("bob").SaveBillAsync(
+            new Bill { Name = "Sneaky", ExpectedAmount = 1m, StartDate = new DateOnly(2026, 9, 1), CategoryId = aliceCategory.Id }));
+    }
+
+    [Fact]
+    public async Task Sample_data_includes_categories_for_its_bills()
+    {
+        var alice = ServiceFor("alice");
+        await alice.StartSampleAsync();
+
+        var sample = ServiceFor("alice");
+        var categories = await sample.GetCategoriesAsync();
+        Assert.Contains(categories, c => c.Name == "Utilities");
+        Assert.All(await sample.GetBillsAsync(), b => Assert.Contains(categories, c => c.Id == b.CategoryId));
+    }
+
+    [Fact]
     public async Task Sample_data_lives_in_its_own_ledger()
     {
         var alice = ServiceFor("alice");

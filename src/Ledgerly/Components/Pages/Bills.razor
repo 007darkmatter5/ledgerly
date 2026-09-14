@@ -25,6 +25,15 @@
             }
             <MudSelectItem T="int?" Value="0">Not assigned</MudSelectItem>
         </MudSelect>
+        <MudSelect T="int?" @bind-Value="CategoryFilter" Label="Category" Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:200px"
+                   ToStringFunc="@(id => id switch { null => "All categories", 0 => "Uncategorized", _ => _categories.FirstOrDefault(c => c.Id == id)?.Name ?? "" })">
+            <MudSelectItem T="int?" Value="null">All categories</MudSelectItem>
+            @foreach (var category in _categories)
+            {
+                <MudSelectItem T="int?" Value="category.Id"><CategoryChip Category="category" /></MudSelectItem>
+            }
+            <MudSelectItem T="int?" Value="0">Uncategorized</MudSelectItem>
+        </MudSelect>
         <MudTextField @bind-Value="_search" Label="Search" Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" Immediate="true" Clearable="true" Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:220px" />
         <MudSwitch @bind-Value="_showInactive" Label="Show inactive" Color="Color.Primary" />
     </MudStack>
@@ -65,7 +74,7 @@
                         }
                     </MudStack>
                 </MudTd>
-                <MudTd DataLabel="Category">@context.Category</MudTd>
+                <MudTd DataLabel="Category"><CategoryChip Category="context.Category" /></MudTd>
                 <MudTd DataLabel="Amount" Style="text-align:right; white-space:nowrap">
                     @context.ExpectedAmount.ToString("C")
                     @if (context.IsVariable)
@@ -139,17 +148,22 @@
 </MudTabs>
 
 @code {
+    /// <summary>Preselects a category filter, e.g. from the Categories page (0 = uncategorized).</summary>
+    [SupplyParameterFromQuery(Name = "category")] private int? CategoryQuery { get; set; }
+
     private bool _loading = true;
     private List<Bill> _bills = [];
     private List<Account> _accounts = [];
+    private List<Category> _categories = [];
     private int? _accountFilter;
+    private int? CategoryFilter { get; set; }
     private string? _search;
     private bool _showInactive;
     private int _tab;
     private DateOnly _month;
 
     private readonly Func<Bill, object> _byName = b => b.Name;
-    private readonly Func<Bill, object> _byCategory = b => b.Category ?? "";
+    private readonly Func<Bill, object> _byCategory = b => b.Category?.Name ?? "￿"; // uncategorized last
     private readonly Func<Bill, object> _byAmount = b => b.ExpectedAmount;
     private readonly Func<Bill, object> _byMonthly = b => Monthly(b);
     private Func<Bill, object> _byNextDue = null!;
@@ -159,10 +173,11 @@
     private IEnumerable<Bill> FilteredBills => _bills.Where(b =>
         (_showInactive || b.IsActive)
         && (_accountFilter is null || (b.PayFromAccountId ?? 0) == _accountFilter)
+        && (CategoryFilter is null || (b.CategoryId ?? 0) == CategoryFilter)
         && (string.IsNullOrWhiteSpace(_search)
             || b.Name.Contains(_search, StringComparison.OrdinalIgnoreCase)
             || (b.Payee?.Contains(_search, StringComparison.OrdinalIgnoreCase) ?? false)
-            || (b.Category?.Contains(_search, StringComparison.OrdinalIgnoreCase) ?? false)));
+            || (b.Category?.Name.Contains(_search, StringComparison.OrdinalIgnoreCase) ?? false)));
 
     private List<BillDue> MonthSchedule => BillSchedule.Between(FilteredBills, _month, _month.AddMonths(1).AddDays(-1)).ToList();
 
@@ -170,6 +185,7 @@
     {
         _month = ThisMonth;
         _byNextDue = b => NextDue(b) ?? DateOnly.MaxValue;
+        CategoryFilter = CategoryQuery;
         await LoadAsync();
     }
 
@@ -177,6 +193,7 @@
     {
         _bills = await Ledger.GetBillsAsync();
         _accounts = await Ledger.GetAccountsAsync();
+        _categories = await Ledger.GetCategoriesAsync();
         _loading = false;
     }
 
@@ -186,13 +203,12 @@
 
     private async Task EditAsync(Bill? bill)
     {
-        var categories = _bills.Select(b => b.Category).OfType<string>().Distinct().Order().ToList();
-        var model = bill?.Copy() ?? new Bill { PayFromAccountId = _accountFilter is > 0 ? _accountFilter : null };
-        var parameters = new DialogParameters<BillDialog>
+        var model = bill?.Copy() ?? new Bill
         {
-            { d => d.Model, model },
-            { d => d.Categories, categories }
+            PayFromAccountId = _accountFilter is > 0 ? _accountFilter : null,
+            CategoryId = CategoryFilter is > 0 ? CategoryFilter : null
         };
+        var parameters = new DialogParameters<BillDialog> { { d => d.Model, model } };
         var dialog = await Dialogs.ShowAsync<BillDialog>(bill is null ? "Add bill" : "Edit bill", parameters,
             new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true });
         if (await dialog.Result is { Canceled: false })

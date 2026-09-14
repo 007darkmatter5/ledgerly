@@ -57,6 +57,8 @@ dotnet ef migrations add <Name> --project src/Ledgerly --output-dir Data/Migrati
 - Recurring dates are always computed from the start date, so month-end anchors don't drift (Jan 31 → Feb 28 → Mar 31).
 - An account balance is "as of the start of" `BalanceAsOf`; projections apply bills/income dated on or after it. `BillOccurrence` stores per-due-date facts (amount override, paid date, loan payment kind); paid bills project on their paid date.
 - Overdue = unpaid, not autopay, due before today, and on/after the pay-from account's balance date.
+- Bills belong to an optional `Category` (per ledger, name unique ignoring case via a NOCASE collation, optional palette color from `CategoryChip.Palette`). `LedgerService.SaveCategoryAsync` throws `LedgerValidationException` (message safe to show) for blank/duplicate names; deleting a category sets its bills' `CategoryId` to null.
+- Migrations that replace a column with a relation must copy data with `migrationBuilder.Sql` before the drop. EF's SQLite table rebuilds run where the rebuilding operation appears, so order the `Up` operations explicitly (see `BillCategories`) and check `dotnet ef migrations script`.
 - Negative/low-balance alerts only fire when the balance crosses the line (a credit card that starts negative isn't "going negative").
 
 ## Loans

@@ -42,6 +42,16 @@ try {
   const menuOpened = await page.waitForSelector('text=Sign out', { timeout: 5000 }).then(() => true, () => false);
   note(`account menu opened: ${menuOpened}`);
   if (!menuOpened) { note('FAIL: account menu did not open'); failed = true; }
+  await page.keyboard.press('Escape');
+
+  // Categories: add one through the dialog and see it listed.
+  await page.goto(`${base}/categories`);
+  await page.click('text=Add category');
+  await page.fill('.mud-dialog input', 'E2E Groceries');
+  await page.click('.mud-dialog button:has-text("Save")');
+  const categoryListed = await page.waitForSelector('.mud-table-body >> text=E2E Groceries', { timeout: 5000 }).then(() => true, () => false);
+  note(`category added and listed: ${categoryListed}`);
+  if (!categoryListed) { note('FAIL: new category did not appear'); failed = true; }
 } catch (e) {
   note(`FAIL: ${e.message}`);
   failed = true;

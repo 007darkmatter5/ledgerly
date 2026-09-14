@@ -68,6 +68,21 @@ public interface ILedgerEntity
     int LedgerId { get; set; }
 }
 
+/// <summary>A user-defined group for bills, like "Utilities" or "Housing".</summary>
+public class Category : ILedgerEntity
+{
+    public Category Copy() => (Category)MemberwiseClone();
+
+    public int Id { get; set; }
+    public int LedgerId { get; set; }
+
+    /// <summary>Unique within a ledger, ignoring case.</summary>
+    public string Name { get; set; } = "";
+
+    /// <summary>Optional hex color, e.g. "#2E7D5B".</summary>
+    public string? Color { get; set; }
+}
+
 /// <summary>A money account that bills are paid from and income is deposited to.</summary>
 public class Account : ILedgerEntity
 {
@@ -102,7 +117,8 @@ public class Bill : ILedgerEntity
     public int LedgerId { get; set; }
     public string Name { get; set; } = "";
     public string? Payee { get; set; }
-    public string? Category { get; set; }
+    public int? CategoryId { get; set; }
+    public Category? Category { get; set; }
 
     /// <summary>The amount normally expected.</summary>
     public decimal ExpectedAmount { get; set; }

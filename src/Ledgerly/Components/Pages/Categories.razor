@@ -1,0 +1,116 @@
+@page "/categories"
+@inject LedgerService Ledger
+@inject IDialogService Dialogs
+@inject ISnackbar Snackbar
+
+<PageTitle>Categories · Ledgerly</PageTitle>
+
+<MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-4" Wrap="Wrap.Wrap">
+    <MudStack Spacing="0">
+        <MudText Typo="Typo.h4">Categories</MudText>
+        <MudText Typo="Typo.body2" Class="mud-text-secondary">Group your bills, like Housing, Utilities or Subscriptions. Renaming a category updates every bill in it.</MudText>
+    </MudStack>
+    <MudSpacer />
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="() => EditAsync(null)">Add category</MudButton>
+</MudStack>
+
+<MudPaper Elevation="1">
+    <MudTable Items="_rows" Hover="true" Loading="_loading" Breakpoint="Breakpoint.Sm" Elevation="0">
+        <HeaderContent>
+            <MudTh>Category</MudTh>
+            <MudTh Style="text-align:right">Bills</MudTh>
+            <MudTh Style="text-align:right">Per month</MudTh>
+            <MudTh></MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd DataLabel="Category">
+                <CategoryChip Category="context.Category" ShowUncategorized="true" />
+            </MudTd>
+            <MudTd DataLabel="Bills" Style="text-align:right">
+                @if (context.BillCount > 0)
+                {
+                    <MudLink Href="@BillsLink(context.Category)">@context.BillCount</MudLink>
+                }
+                else
+                {
+                    <span class="mud-text-secondary">0</span>
+                }
+            </MudTd>
+            <MudTd DataLabel="Per month" Style="text-align:right">@context.Monthly.ToString("C")</MudTd>
+            <MudTd Style="text-align:right; white-space:nowrap">
+                @if (context.Category is { } category)
+                {
+                    <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="() => EditAsync(category)" aria-label="@($"Edit {category.Name}")" />
+                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="() => DeleteAsync(context)" aria-label="@($"Delete {category.Name}")" />
+                }
+            </MudTd>
+        </RowTemplate>
+        <FooterContent>
+            <MudTd><strong>Total</strong></MudTd>
+            <MudTd Style="text-align:right"><strong>@_rows.Sum(r => r.BillCount)</strong></MudTd>
+            <MudTd Style="text-align:right"><strong>@_rows.Sum(r => r.Monthly).ToString("C")</strong></MudTd>
+            <MudTd />
+        </FooterContent>
+        <NoRecordsContent>
+            <MudText Class="py-6 mud-text-secondary">No categories yet. Add one, then choose it when you add or edit a bill.</MudText>
+        </NoRecordsContent>
+    </MudTable>
+</MudPaper>
+<MudText Typo="Typo.caption" Class="mud-text-secondary mt-2 d-block">Per month counts active bills, averaged to a monthly amount.</MudText>
+
+@code {
+    private record Row(Category? Category, int BillCount, decimal Monthly);
+
+    private bool _loading = true;
+    private List<Row> _rows = [];
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        var categories = await Ledger.GetCategoriesAsync();
+        var bills = await Ledger.GetBillsAsync();
+
+        Row RowFor(Category? category, IEnumerable<Bill> inCategory)
+        {
+            var list = inCategory.ToList();
+            return new Row(category, list.Count, list.Where(b => b.IsActive).Sum(b => Recurrence.MonthlyEquivalent(b.Frequency, b.ExpectedAmount)));
+        }
+
+        _rows = categories.Select(c => RowFor(c, bills.Where(b => b.CategoryId == c.Id))).ToList();
+        var uncategorized = bills.Where(b => b.CategoryId is null).ToList();
+        if (uncategorized.Count > 0)
+            _rows.Add(RowFor(null, uncategorized));
+        _loading = false;
+    }
+
+    private static string BillsLink(Category? category) => $"bills?category={category?.Id ?? 0}";
+
+    private async Task EditAsync(Category? category)
+    {
+        var parameters = new DialogParameters<CategoryDialog> { { d => d.Model, category?.Copy() ?? new Category { Color = CategoryChip.Palette[_rows.Count % CategoryChip.Palette.Length] } } };
+        var dialog = await Dialogs.ShowAsync<CategoryDialog>(category is null ? "Add category" : "Edit category", parameters,
+            new DialogOptions { MaxWidth = MaxWidth.ExtraSmall, FullWidth = true });
+        if (await dialog.Result is { Canceled: false })
+        {
+            Snackbar.Add(category is null ? "Category added" : "Category saved", Severity.Success);
+            await LoadAsync();
+        }
+    }
+
+    private async Task DeleteAsync(Row row)
+    {
+        var category = row.Category!;
+        var confirmed = await Dialogs.ShowMessageBoxAsync("Delete category?",
+            row.BillCount == 0
+                ? $"Delete \"{category.Name}\"?"
+                : $"Delete \"{category.Name}\"? Its {row.BillCount} bill{(row.BillCount == 1 ? "" : "s")} will be kept and become uncategorized.",
+            yesText: "Delete", cancelText: "Cancel");
+        if (confirmed != true)
+            return;
+
+        await Ledger.DeleteCategoryAsync(category.Id);
+        Snackbar.Add("Category deleted", Severity.Info);
+        await LoadAsync();
+    }
+}

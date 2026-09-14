@@ -105,6 +105,42 @@ public class LedgerService(IDbContextFactory<LedgerlyDbContext> dbFactory, ICurr
 
     public Task DeleteAccountAsync(int id) => DeleteAsync<Account>(id);
 
+    // Categories
+
+    public async Task<List<Category>> GetCategoriesAsync()
+    {
+        var ledgerId = await LedgerIdAsync();
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var categories = await db.Categories.AsNoTracking().Where(c => c.LedgerId == ledgerId).ToListAsync();
+        return categories.OrderBy(c => c.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
+    }
+
+    /// <summary>Adds or renames a category. Throws <see cref="LedgerValidationException"/> for a blank or duplicate name.</summary>
+    public async Task SaveCategoryAsync(Category category)
+    {
+        category.Name = category.Name.Trim();
+        if (category.Name.Length == 0)
+            throw new LedgerValidationException("Enter a category name.");
+        if (category.Name.Length > 50)
+            throw new LedgerValidationException("Category names can be up to 50 characters.");
+
+        var ledgerId = await LedgerIdAsync();
+        await using (var db = await dbFactory.CreateDbContextAsync())
+        {
+            var names = await db.Categories.AsNoTracking()
+                .Where(c => c.LedgerId == ledgerId && c.Id != category.Id)
+                .Select(c => c.Name)
+                .ToListAsync();
+            if (names.Contains(category.Name, StringComparer.OrdinalIgnoreCase))
+                throw new LedgerValidationException($"There's already a category called \"{category.Name}\".");
+        }
+
+        await SaveAsync(category);
+    }
+
+    /// <summary>Deletes a category. Its bills are kept and become uncategorized.</summary>
+    public Task DeleteCategoryAsync(int id) => DeleteAsync<Category>(id);
+
     // Bills
 
     public async Task<List<Bill>> GetBillsAsync()
@@ -115,6 +151,7 @@ public class LedgerService(IDbContextFactory<LedgerlyDbContext> dbFactory, ICurr
             .Where(b => b.LedgerId == ledgerId)
             .Include(b => b.PayFromAccount)
             .Include(b => b.Loan)
+            .Include(b => b.Category)
             .Include(b => b.Occurrences)
             .ToListAsync();
         return bills.OrderBy(b => b.Name).ToList();
@@ -127,6 +164,7 @@ public class LedgerService(IDbContextFactory<LedgerlyDbContext> dbFactory, ICurr
         {
             await EnsureInLedgerAsync(db.Accounts, bill.PayFromAccountId, ledgerId);
             await EnsureInLedgerAsync(db.Loans, bill.LoanId, ledgerId);
+            await EnsureInLedgerAsync(db.Categories, bill.CategoryId, ledgerId);
         }
         await SaveAsync(bill);
     }
@@ -177,12 +215,16 @@ public class LedgerService(IDbContextFactory<LedgerlyDbContext> dbFactory, ICurr
         await EnsureInLedgerAsync(db.Accounts, payFromAccountId, ledgerId);
         var loan = await db.Loans.AsNoTracking().SingleAsync(l => l.Id == loanId);
 
+        // Use the same category as the loan's other bills, if any.
+        var categoryId = await db.Bills.Where(b => b.LedgerId == ledgerId && b.LoanId == loanId && b.CategoryId != null)
+            .Select(b => b.CategoryId).FirstOrDefaultAsync();
+
         db.Bills.Add(new Bill
         {
             LedgerId = ledgerId,
             Name = $"{loan.Name} extra payment",
             Payee = loan.Lender,
-            Category = "Debt",
+            CategoryId = categoryId,
             LoanId = loanId,
             LoanPaymentKind = LoanPaymentKind.ExtraPrincipal,
             ExpectedAmount = amount,

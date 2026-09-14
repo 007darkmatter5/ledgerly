@@ -1,0 +1,25 @@
+@if (Category is not null)
+{
+    <span class="category-chip" style="@Style">
+        <span class="category-dot" style="background:@(Category.Color ?? "var(--mud-palette-text-disabled)")"></span>
+        @Category.Name
+    </span>
+}
+else if (ShowUncategorized)
+{
+    <span class="category-chip category-chip-empty">Uncategorized</span>
+}
+
+@code {
+    [Parameter] public Category? Category { get; set; }
+    [Parameter] public bool ShowUncategorized { get; set; }
+
+    private string? Style => Category?.Color is { } color ? $"border-color:{color}" : null;
+
+    /// <summary>The colors offered when creating or editing a category.</summary>
+    public static readonly string[] Palette =
+    [
+        "#2E7D5B", "#16A085", "#3F6FB5", "#5C6BC0", "#8E44AD", "#E91E63",
+        "#C0392B", "#D35400", "#F39C12", "#7CB342", "#795548", "#607D8B"
+    ];
+}

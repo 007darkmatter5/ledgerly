@@ -313,12 +313,14 @@ else
     {
         var today = Ledger.Today;
         var monthly = _bills.FirstOrDefault(b => b.LoanPaymentKind == LoanPaymentKind.MonthlyPayment);
+        // Reuse the category of this loan's other bills, if any.
+        var categoryId = _bills.FirstOrDefault(b => b.CategoryId is not null)?.CategoryId;
         var bill = kind == LoanPaymentKind.MonthlyPayment
             ? new Bill
             {
                 Name = _loan!.Name,
                 Payee = _loan.Lender,
-                Category = "Debt",
+                CategoryId = categoryId,
                 LoanId = _loan.Id,
                 ExpectedAmount = MonthlyAmount,
                 // Start from the next payment so past due dates aren't flagged as overdue.
@@ -328,7 +330,7 @@ else
             {
                 Name = $"{_loan!.Name} extra payment",
                 Payee = _loan.Lender,
-                Category = "Debt",
+                CategoryId = categoryId,
                 LoanId = _loan.Id,
                 LoanPaymentKind = LoanPaymentKind.ExtraPrincipal,
                 PayFromAccountId = monthly?.PayFromAccountId,

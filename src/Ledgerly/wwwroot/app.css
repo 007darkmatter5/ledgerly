@@ -17,6 +17,59 @@ h1:focus {
     outline-offset: 2px;
 }
 
+/* Category chips and color picker. */
+.category-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 1px 10px 1px 8px;
+    border: 1px solid var(--mud-palette-lines-default);
+    border-radius: 12px;
+    font-size: 0.8125rem;
+    line-height: 1.5;
+    white-space: nowrap;
+}
+
+.category-chip-empty {
+    color: var(--mud-palette-text-secondary);
+    border-style: dashed;
+}
+
+.category-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex: none;
+}
+
+.color-swatch {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    border: 2px solid transparent;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+}
+
+.color-swatch.none {
+    background: transparent;
+    border-color: var(--mud-palette-lines-default);
+    color: var(--mud-palette-text-secondary);
+}
+
+.color-swatch.selected {
+    outline: 2px solid var(--mud-palette-text-primary);
+    outline-offset: 2px;
+}
+
+.color-swatch:focus-visible {
+    outline: 2px solid var(--mud-palette-primary);
+    outline-offset: 2px;
+}
+
 /* Table row highlights: projected balance below zero / below the warning threshold, current loan month. */
 .mud-table-row.row-negative {
     background-color: rgb(from var(--mud-palette-error) r g b / 0.10);
