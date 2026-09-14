@@ -7,11 +7,13 @@ ARG TARGETARCH
 ARG VERSION=0.0.0-dev
 WORKDIR /src
 
-COPY src/Ledgerly/Ledgerly.csproj src/Ledgerly/
-RUN dotnet restore src/Ledgerly/Ledgerly.csproj -a $TARGETARCH
-
+# Restore only after the full source is copied. Restoring from the .csproj alone (the usual layer-caching
+# trick) makes the SDK leave out Blazor's framework scripts (_framework/blazor.web.js), and the app then
+# renders but never becomes interactive.
 COPY src/ src/
-RUN dotnet publish src/Ledgerly/Ledgerly.csproj -c Release -a $TARGETARCH --no-restore -o /out/app -p:Version=$VERSION \
+RUN dotnet restore src/Ledgerly/Ledgerly.csproj -a $TARGETARCH \
+    && dotnet publish src/Ledgerly/Ledgerly.csproj -c Release -a $TARGETARCH --no-restore -o /out/app -p:Version=$VERSION \
+    && test -f /out/app/wwwroot/_framework/blazor.web.js \
     && mkdir -p /out/data /out/keys
 
 # No RUN steps below: the final stage is for the target architecture and must build without emulation.

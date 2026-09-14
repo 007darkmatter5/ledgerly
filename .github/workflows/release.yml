@@ -87,7 +87,12 @@ jobs:
             done
             docker logs "$name"
             [ -n "$ok" ] || { echo "$name: never became healthy"; exit 1; }
-            curl -fsS http://localhost:8080/Account/Login | grep -q "Sign in"
+            curl -fsS http://localhost:8080/Account/Login > login.html
+            grep -q "Sign in" login.html
+            # Every script and stylesheet the page references must load (a missing blazor.web.js leaves the app non-interactive).
+            for asset in $(grep -oE '(src|href)="[^"#:]+\.(js|css)"' login.html | sed -E 's/^(src|href)="//; s/"$//'); do
+              curl -fsS -o /dev/null "http://localhost:8080/$asset" || { echo "$name: $asset failed to load"; exit 1; }
+            done
             uid=$(docker exec "$name" cat /proc/1/status | awk '/^Uid:/ {print $2}')
             [ "$uid" = "$expected_uid" ] || { echo "$name: app runs as UID $uid, expected $expected_uid"; exit 1; }
             [ "$(sudo stat -c %u "$name/data/ledgerly.db")" = "$expected_uid" ] || { echo "$name: database not owned by $expected_uid"; exit 1; }
@@ -108,6 +113,24 @@ jobs:
           # Explicit non-root user with folders it already owns.
           sudo mkdir -p nonroot/data nonroot/keys && sudo chown -R 99:100 nonroot
           smoke nonroot 99 --user 99:100 -e HOME=/tmp
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      # Use the app in a real browser, so a build that renders but isn't interactive can't be released.
+      - name: Browser test
+        run: |
+          sudo mkdir -p browser/data browser/keys
+          docker run -d --name browser -p 8080:8080 -e PUID=99 -e PGID=100 \
+            -v "$PWD/browser/data:/data" -v "$PWD/browser/keys:/keys" -v /etc/localtime:/etc/localtime:ro ledgerly:smoke
+          for i in $(seq 1 60); do curl -fsS http://localhost:8080/healthz >/dev/null 2>&1 && break; sleep 1; done
+          cd tests/e2e
+          npm init -y >/dev/null
+          npm install playwright@1 >/dev/null
+          npx playwright install --with-deps chromium >/dev/null
+          node interactivity.mjs http://localhost:8080 || { docker logs browser; exit 1; }
+          docker rm -f browser
 
       - uses: docker/login-action@v4
         with:
