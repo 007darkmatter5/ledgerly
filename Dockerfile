@@ -14,6 +14,7 @@ COPY src/ src/
 RUN dotnet publish src/Ledgerly/Ledgerly.csproj -c Release -a $TARGETARCH --no-restore -o /out/app -p:Version=$VERSION \
     && mkdir -p /out/data /out/keys
 
+# No RUN steps below: the final stage is for the target architecture and must build without emulation.
 FROM mcr.microsoft.com/dotnet/aspnet:10.0
 ARG VERSION=0.0.0-dev
 ARG CHANNEL=Development
@@ -24,17 +25,20 @@ LABEL org.opencontainers.image.title="Ledgerly" \
 
 WORKDIR /app
 COPY --from=build /out/app .
-# Owned by the image's non-root "app" user (UID 1654) so mounted volumes start out writable.
 COPY --from=build --chown=1654:1654 /out/data /data
 COPY --from=build --chown=1654:1654 /out/keys /keys
+COPY --chmod=755 docker/entrypoint.sh /usr/local/bin/ledgerly-entrypoint
 
 ENV ASPNETCORE_HTTP_PORTS=8080 \
     ConnectionStrings__Ledgerly="Data Source=/data/ledgerly.db" \
     DataProtection__KeysPath=/keys \
-    Ledgerly__Channel=$CHANNEL
+    Ledgerly__Channel=$CHANNEL \
+    PUID=1654 \
+    PGID=1654
 
 # The database lives in /data; encryption keys (for sign-in cookies and the saved email password) in /keys.
 VOLUME ["/data", "/keys"]
 EXPOSE 8080
-USER 1654
-ENTRYPOINT ["dotnet", "Ledgerly.dll"]
+
+# Starts as root only to give /data and /keys to PUID:PGID, then runs Ledgerly as that user (see entrypoint.sh).
+ENTRYPOINT ["ledgerly-entrypoint"]

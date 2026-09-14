@@ -40,7 +40,7 @@ Use [`deploy/unraid/docker-compose.yml`](deploy/unraid/docker-compose.yml) with 
 2. On the stack's gear icon, choose **Edit Stack → Compose File**, paste the file's contents and save.
 3. Click **Compose Up**. Open `http://<unraid-ip>:5006` and create the first account (it becomes the admin).
 
-It stores everything in `/mnt/user/appdata/ledgerly-beta` (`data/` for the database, `keys/` for encryption keys), runs as `nobody:users` (99:100) like other Unraid containers, and uses the server's time zone. A small one-shot `ledgerly-beta-init` container fixes folder permissions on each start; it shows as stopped, which is expected.
+It's a single container that stores everything in `/mnt/user/appdata/ledgerly-beta` (`data/` for the database, `keys/` for encryption keys) and uses the server's time zone. On start it gives those folders to `PUID`/`PGID` (99/100, `nobody:users`, like other Unraid containers) and then runs Ledgerly as that user, not root.
 
 - **Update to the newest beta:** on the stack, **Update Stack** (pulls `:beta` and recreates the container). Database changes run automatically on start.
 - **Back up before updating:** Ledgerly doesn't make its own backup here. Use the **Appdata Backup** plugin (it stops containers for a consistent copy), or stop the stack and copy `/mnt/user/appdata/ledgerly-beta`.

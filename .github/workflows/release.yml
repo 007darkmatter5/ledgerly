@@ -71,24 +71,43 @@ jobs:
             CHANNEL=${{ steps.meta.outputs.channel }}
           cache-from: type=gha,scope=${{ github.ref_name }}
 
-      # Start the real image the way Unraid runs it (UID 99:100, bind-mounted folders) and make sure it comes up.
+      # Start the real image the ways it's deployed, with bind-mounted folders, and make sure it comes up
+      # as the right user with its database and keys written.
       - name: Smoke test
         run: |
-          mkdir -p smoke/data smoke/keys
-          sudo chown -R 99:100 smoke
-          docker run -d --name smoke --user 99:100 -e HOME=/tmp -p 8080:8080 \
-            -v "$PWD/smoke/data:/data" -v "$PWD/smoke/keys:/keys" ledgerly:smoke
-          for i in $(seq 1 60); do
-            if curl -fsS http://localhost:8080/healthz; then echo; break; fi
-            sleep 1
-          done
-          docker logs smoke
-          curl -fsS http://localhost:8080/healthz
-          curl -fsS http://localhost:8080/Account/Login | grep -q "Sign in"
-          sudo test -f smoke/data/ledgerly.db
-          sudo sh -c 'ls smoke/keys/key-*.xml'
-          if docker logs smoke 2>&1 | grep -E "^(fail|crit):"; then echo "Errors in startup logs"; exit 1; fi
-          docker rm -f smoke
+          set -eu
+          smoke() {
+            name=$1 expected_uid=$2; shift 2
+            echo "::group::$name"
+            docker run -d --name "$name" -p 8080:8080 -v "$PWD/$name/data:/data" -v "$PWD/$name/keys:/keys" "$@" ledgerly:smoke
+            ok=""
+            for i in $(seq 1 60); do
+              if curl -fsS http://localhost:8080/healthz >/dev/null 2>&1; then ok=1; break; fi
+              sleep 1
+            done
+            docker logs "$name"
+            [ -n "$ok" ] || { echo "$name: never became healthy"; exit 1; }
+            curl -fsS http://localhost:8080/Account/Login | grep -q "Sign in"
+            uid=$(docker exec "$name" cat /proc/1/status | awk '/^Uid:/ {print $2}')
+            [ "$uid" = "$expected_uid" ] || { echo "$name: app runs as UID $uid, expected $expected_uid"; exit 1; }
+            [ "$(sudo stat -c %u "$name/data/ledgerly.db")" = "$expected_uid" ] || { echo "$name: database not owned by $expected_uid"; exit 1; }
+            sudo sh -c "ls $name/keys/key-*.xml"
+            if docker logs "$name" 2>&1 | grep -E "^(fail|crit):"; then echo "$name: errors in startup logs"; exit 1; fi
+            docker rm -f "$name"
+            echo "::endgroup::"
+          }
+
+          # Unraid: folders freshly created by Docker as root, PUID/PGID set.
+          sudo mkdir -p unraid/data unraid/keys
+          smoke unraid 99 -e PUID=99 -e PGID=100
+
+          # install.sh: folders owned by the image's default user, no PUID.
+          sudo mkdir -p defaults/data defaults/keys && sudo chown -R 1654:1654 defaults
+          smoke defaults 1654
+
+          # Explicit non-root user with folders it already owns.
+          sudo mkdir -p nonroot/data nonroot/keys && sudo chown -R 99:100 nonroot
+          smoke nonroot 99 --user 99:100 -e HOME=/tmp
 
       - uses: docker/login-action@v4
         with:

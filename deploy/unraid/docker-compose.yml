@@ -10,34 +10,22 @@
 # Data lives in /mnt/user/appdata/ledgerly-beta:
 #   data/  the SQLite database (ledgerly.db)
 #   keys/  encryption keys for sign-in cookies and the saved email password. Keep them with the data.
+#
+# The container gives those folders to PUID:PGID when it starts, then runs Ledgerly as that user (not root).
 
 name: ledgerly-beta
 
 services:
-  # Runs once before Ledgerly starts: creates the appdata folders and gives them to nobody:users (99:100),
-  # the owner Unraid uses for appdata, so Ledgerly can write its database and keys.
-  ledgerly-beta-init:
-    image: busybox:1.37
-    container_name: ledgerly-beta-init
-    command: ["sh", "-c", "chown -R 99:100 /data /keys && chmod 700 /keys"]
-    volumes:
-      - /mnt/user/appdata/ledgerly-beta/data:/data
-      - /mnt/user/appdata/ledgerly-beta/keys:/keys
-    restart: "no"
-
   ledgerly-beta:
     image: ghcr.io/007darkmatter5/ledgerly:beta
     container_name: ledgerly-beta
-    depends_on:
-      ledgerly-beta-init:
-        condition: service_completed_successfully
-    user: "99:100"
     restart: unless-stopped
     ports:
       - "5006:8080"                      # change the left number if 5006 is taken
     environment:
+      PUID: 99                           # nobody
+      PGID: 100                          # users
       Ledgerly__Channel: Beta
-      HOME: /tmp
       # TZ: America/Chicago              # only if the /etc/localtime mount below doesn't give the right time zone
       # Ledgerly__Culture: en-US          # money/date format (default en-US)
       # ASPNETCORE_FORWARDEDHEADERS_ENABLED: "true"   # behind a reverse proxy (SWAG, Nginx Proxy Manager, Traefik) that handles HTTPS
