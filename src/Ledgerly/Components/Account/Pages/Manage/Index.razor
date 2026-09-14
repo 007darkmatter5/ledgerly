@@ -1,0 +1,42 @@
+@page "/Account/Manage"
+
+@inject UserManager<ApplicationUser> UserManager
+@inject IdentityRedirectManager RedirectManager
+
+<PageTitle>Profile · Ledgerly</PageTitle>
+
+<h2 class="acct-subtitle">Profile</h2>
+<StatusMessage />
+
+<dl class="acct-summary">
+    <dt>Email</dt>
+    <dd>@email</dd>
+    <dt>Password</dt>
+    <dd><a href="Account/Manage/ChangePassword">Change password</a></dd>
+    <dt>Two-factor authentication</dt>
+    <dd>
+        @(twoFactorEnabled ? "On" : "Off") ·
+        <a href="Account/Manage/TwoFactorAuthentication">@(twoFactorEnabled ? "Manage" : "Turn on")</a>
+    </dd>
+</dl>
+
+@code {
+    private string? email;
+    private bool twoFactorEnabled;
+
+    [CascadingParameter]
+    private HttpContext HttpContext { get; set; } = default!;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var user = await UserManager.GetUserAsync(HttpContext.User);
+        if (user is null)
+        {
+            RedirectManager.RedirectToInvalidUser(UserManager, HttpContext);
+            return;
+        }
+
+        email = await UserManager.GetEmailAsync(user);
+        twoFactorEnabled = await UserManager.GetTwoFactorEnabledAsync(user);
+    }
+}

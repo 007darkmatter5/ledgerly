@@ -1,0 +1,182 @@
+@inherits LayoutComponentBase
+@inject LedgerService Ledger
+@inject NavigationManager Navigation
+@inject IDialogService Dialogs
+@inject IJSRuntime JS
+@inject AppInfo App
+
+<MudThemeProvider @ref="_themeProvider" Theme="_theme" @bind-IsDarkMode="_isDarkMode" />
+<MudPopoverProvider />
+<MudDialogProvider CloseOnEscapeKey="true" />
+<MudSnackbarProvider />
+
+<MudLayout>
+    <MudAppBar Elevation="1">
+        <MudIconButton Icon="@Icons.Material.Filled.Menu" Color="Color.Inherit" Edge="Edge.Start" OnClick="() => _drawerOpen = !_drawerOpen" aria-label="Toggle navigation" />
+        <MudIcon Icon="@Icons.Material.Filled.AccountBalanceWallet" Class="ml-2 mr-2" />
+        <MudText Typo="Typo.h6">Ledgerly</MudText>
+        @if (App.IsBeta)
+        {
+            <MudTooltip Text="@($"Beta build {App.Version}. For testing updates before they reach production.")">
+                <MudChip T="string" Color="Color.Secondary" Size="Size.Small" Class="ml-3" Icon="@Icons.Material.Filled.BugReport">Beta</MudChip>
+            </MudTooltip>
+        }
+        @if (_ledger?.IsSample == true)
+        {
+            <MudChip T="string" Color="Color.Warning" Size="Size.Small" Class="ml-3" Icon="@Icons.Material.Filled.Science">Sample data</MudChip>
+        }
+        <MudSpacer />
+        <MudTooltip Text="@(_isDarkMode ? "Light mode" : "Dark mode")">
+            <MudIconButton Icon="@(_isDarkMode ? Icons.Material.Filled.LightMode : Icons.Material.Filled.DarkMode)" Color="Color.Inherit" OnClick="() => _isDarkMode = !_isDarkMode" aria-label="Toggle dark mode" />
+        </MudTooltip>
+        <MudMenu AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight">
+            <ActivatorContent>
+                <button type="button" class="avatar-button ml-2" aria-label="Account menu" @onclick="@(e => context.ToggleAsync(e))">
+                    <MudAvatar Color="Color.Secondary" Size="Size.Small">@Initial</MudAvatar>
+                </button>
+            </ActivatorContent>
+            <ChildContent>
+                <div class="px-4 pt-2 pb-2">
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary">Signed in as</MudText>
+                    <MudText Typo="Typo.body2">@_email</MudText>
+                </div>
+                <MudDivider />
+                <MudMenuItem Icon="@(_ledger?.IsSample == false ? Icons.Material.Filled.RadioButtonChecked : Icons.Material.Filled.RadioButtonUnchecked)"
+                             OnClick="() => SwitchLedgerAsync(sample: false)">My ledger</MudMenuItem>
+                @if (_hasSample)
+                {
+                    <MudMenuItem Icon="@(_ledger?.IsSample == true ? Icons.Material.Filled.RadioButtonChecked : Icons.Material.Filled.RadioButtonUnchecked)"
+                                 OnClick="() => SwitchLedgerAsync(sample: true)">Sample data</MudMenuItem>
+                    <MudMenuItem Icon="@Icons.Material.Filled.DeleteSweep" IconColor="Color.Error" OnClick="DeleteSampleAsync">Delete sample data</MudMenuItem>
+                }
+                else
+                {
+                    <MudMenuItem Icon="@Icons.Material.Filled.Science" OnClick="StartSampleAsync">Explore sample data</MudMenuItem>
+                }
+                <MudDivider />
+                <MudMenuItem Icon="@Icons.Material.Filled.ManageAccounts" Href="Account/Manage" ForceLoad="true">Account settings</MudMenuItem>
+                <MudMenuItem Icon="@Icons.Material.Filled.Logout" OnClick="SignOutAsync">Sign out</MudMenuItem>
+            </ChildContent>
+        </MudMenu>
+    </MudAppBar>
+    <MudDrawer @bind-Open="_drawerOpen" ClipMode="DrawerClipMode.Always" Elevation="1" Variant="DrawerVariant.Responsive">
+        <NavMenu />
+    </MudDrawer>
+    <MudMainContent>
+        @if (_ledger?.IsSample == true)
+        {
+            <MudAlert Severity="Severity.Warning" Variant="Variant.Filled" Square="true" Icon="@Icons.Material.Filled.Science" Class="sample-banner">
+                <div class="d-flex flex-wrap align-center gap-2">
+                    <span><strong>You're exploring sample data.</strong> It's kept completely separate from your own ledger, so nothing here affects your real data.</span>
+                    <MudSpacer />
+                    <div class="d-flex flex-wrap gap-2">
+                        <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Inherit" OnClick="StartSampleAsync">Start over</MudButton>
+                        <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Inherit" OnClick="DeleteSampleAsync">Delete sample data</MudButton>
+                        <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Dark" OnClick="() => SwitchLedgerAsync(sample: false)">Go to my ledger</MudButton>
+                    </div>
+                </div>
+            </MudAlert>
+        }
+        <MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="py-6">
+            @Body
+        </MudContainer>
+    </MudMainContent>
+</MudLayout>
+
+@* Sign-out must be a real form post so the server can clear the auth cookie. *@
+<form id="logout-form" action="Account/Logout" method="post" hidden>
+    <AntiforgeryToken />
+    <input type="hidden" name="ReturnUrl" value="" />
+</form>
+
+<div id="blazor-error-ui" data-nosnippet>
+    An unhandled error has occurred.
+    <a href="." class="reload">Reload</a>
+    <span class="dismiss">🗙</span>
+</div>
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState> AuthenticationState { get; set; } = null!;
+
+    private MudThemeProvider? _themeProvider;
+    private bool _drawerOpen = true;
+    private bool _isDarkMode;
+    private string? _email;
+    private Ledger? _ledger;
+    private bool _hasSample;
+
+    private string Initial => string.IsNullOrEmpty(_email) ? "?" : _email[..1].ToUpperInvariant();
+
+    private readonly MudTheme _theme = new()
+    {
+        PaletteLight = new PaletteLight
+        {
+            Primary = "#2E7D5B",
+            Secondary = "#3F6FB5",
+            AppbarBackground = "#1F5A41"
+        },
+        PaletteDark = new PaletteDark
+        {
+            Primary = "#5FBF8F",
+            Secondary = "#7FA8E0"
+        }
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        var state = await AuthenticationState;
+        if (state.User.Identity?.IsAuthenticated != true)
+            return;
+
+        _email = state.User.Identity.Name;
+        _ledger = await Ledger.GetActiveLedgerAsync();
+        _hasSample = await Ledger.HasSampleLedgerAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && _themeProvider is not null)
+        {
+            _isDarkMode = await _themeProvider.GetSystemDarkModeAsync();
+            StateHasChanged();
+        }
+    }
+
+    // Ledger changes reload the app so every page and cached value reflects the new ledger.
+    private async Task SwitchLedgerAsync(bool sample)
+    {
+        if (_ledger?.IsSample == sample)
+            return;
+        await Ledger.SwitchLedgerAsync(sample);
+        Navigation.NavigateTo("", forceLoad: true);
+    }
+
+    private async Task StartSampleAsync()
+    {
+        if (_hasSample)
+        {
+            var confirmed = await Dialogs.ShowMessageBoxAsync("Start sample data over?",
+                "This replaces the sample data, including any changes you made to it, with a fresh copy. Your own ledger isn't affected.",
+                yesText: "Start over", cancelText: "Cancel");
+            if (confirmed != true)
+                return;
+        }
+
+        await Ledger.StartSampleAsync();
+        Navigation.NavigateTo("", forceLoad: true);
+    }
+
+    private async Task DeleteSampleAsync()
+    {
+        var confirmed = await Dialogs.ShowMessageBoxAsync("Delete sample data?",
+            "This deletes all sample accounts, bills, income and loans and takes you back to your own ledger. Your own ledger isn't affected.",
+            yesText: "Delete sample data", cancelText: "Cancel");
+        if (confirmed != true)
+            return;
+
+        await Ledger.DeleteSampleAsync();
+        Navigation.NavigateTo("", forceLoad: true);
+    }
+
+    private async Task SignOutAsync() => await JS.InvokeVoidAsync("ledgerly.submitForm", "logout-form");
+}

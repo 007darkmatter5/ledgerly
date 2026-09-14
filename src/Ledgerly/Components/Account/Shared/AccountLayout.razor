@@ -1,0 +1,20 @@
+@inherits LayoutComponentBase
+@inject Ledgerly.Services.AppInfo App
+@* Sign-in and account pages render as static server forms (Identity needs HttpContext), so they
+   use this lightweight layout instead of the interactive MudBlazor one. *@
+
+<div class="acct">
+    <header class="acct-header">
+        <a href="" class="acct-brand">
+            <MudIcon Icon="@Icons.Material.Filled.AccountBalanceWallet" />
+            <span>Ledgerly</span>
+        </a>
+        @if (App.IsBeta)
+        {
+            <span class="acct-channel" title="Beta build @App.Version">Beta</span>
+        }
+    </header>
+    <main class="acct-main">
+        @Body
+    </main>
+</div>

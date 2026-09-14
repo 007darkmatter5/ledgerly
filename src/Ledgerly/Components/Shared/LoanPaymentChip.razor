@@ -1,0 +1,12 @@
+@if (Kind == LoanPaymentKind.ExtraPrincipal)
+{
+    <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Outlined" Icon="@Icons.Material.Filled.TrendingDown">Extra to principal</MudChip>
+}
+else
+{
+    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">Monthly payment</MudChip>
+}
+
+@code {
+    [Parameter, EditorRequired] public LoanPaymentKind Kind { get; set; }
+}

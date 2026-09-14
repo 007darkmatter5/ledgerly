@@ -1,0 +1,79 @@
+@page "/calculator"
+@inject LedgerService Ledger
+
+<PageTitle>Amortization Calculator · Ledgerly</PageTitle>
+
+<MudText Typo="Typo.h4">Amortization calculator</MudText>
+<MudText Typo="Typo.body2" Class="mud-text-secondary mb-4">Try out a loan without saving it. Nothing here changes your data.</MudText>
+
+<MudPaper Elevation="1" Class="pa-4 mb-3">
+    <MudGrid Spacing="2">
+        <MudItem xs="12" sm="6" md="3">
+            <MudNumericField T="decimal" Value="_principal" ValueChanged="v => Set(() => _principal = v)" Label="Loan amount" Format="N2" Min="0m" Adornment="Adornment.Start" AdornmentText="$" Variant="Variant.Outlined" Margin="Margin.Dense" />
+        </MudItem>
+        <MudItem xs="12" sm="6" md="2">
+            <MudNumericField T="decimal" Value="_rate" ValueChanged="v => Set(() => _rate = v)" Label="Interest rate" Format="0.###" Min="0m" Max="100m" Step="0.125m" Adornment="Adornment.End" AdornmentText="%" Variant="Variant.Outlined" Margin="Margin.Dense" />
+        </MudItem>
+        <MudItem xs="6" sm="4" md="2">
+            <MudNumericField T="int" Value="_termYears" ValueChanged="v => Set(() => _termYears = v)" Label="Years" Min="0" Max="100" Variant="Variant.Outlined" Margin="Margin.Dense" />
+        </MudItem>
+        <MudItem xs="6" sm="4" md="1">
+            <MudNumericField T="int" Value="_termExtraMonths" ValueChanged="v => Set(() => _termExtraMonths = v)" Label="+ Months" Min="0" Max="11" Variant="Variant.Outlined" Margin="Margin.Dense" />
+        </MudItem>
+        <MudItem xs="12" sm="4" md="2">
+            <MudNumericField T="decimal" Value="_extra" ValueChanged="v => Set(() => _extra = v)" Label="Extra / month" Format="N2" Min="0m" Adornment="Adornment.Start" AdornmentText="$" Variant="Variant.Outlined" Margin="Margin.Dense" />
+        </MudItem>
+        <MudItem xs="12" sm="6" md="2">
+            <DateOnlyPicker Value="_firstPayment" ValueChanged="v => Set(() => _firstPayment = v)" Label="First payment" />
+        </MudItem>
+    </MudGrid>
+</MudPaper>
+
+@if (_error is not null)
+{
+    <MudAlert Severity="Severity.Info">@_error</MudAlert>
+}
+else if (_schedule is not null)
+{
+    <AmortizationView Schedule="_schedule" Comparison="_comparison" ExtraPrincipal="_extra" />
+}
+
+@code {
+    private decimal _principal = 250_000m;
+    private decimal _rate = 6.5m;
+    private int _termYears = 30;
+    private int _termExtraMonths;
+    private decimal _extra;
+    private DateOnly? _firstPayment;
+
+    private AmortizationSchedule? _schedule;
+    private AmortizationSchedule? _comparison;
+    private string? _error;
+
+    protected override void OnInitialized()
+    {
+        var today = Ledger.Today;
+        _firstPayment = new DateOnly(today.Year, today.Month, 1).AddMonths(1);
+        Calculate();
+    }
+
+    private void Set(Action assign)
+    {
+        assign();
+        Calculate();
+    }
+
+    private void Calculate()
+    {
+        var term = _termYears * 12 + _termExtraMonths;
+        _error = _principal <= 0 ? "Enter a loan amount."
+            : term <= 0 ? "Enter a term."
+            : null;
+        if (_error is not null)
+            return;
+
+        var first = _firstPayment ?? Ledger.Today;
+        _schedule = Amortization.Build(_principal, _rate, first, termMonths: term, extraPrincipal: _extra);
+        _comparison = _extra > 0 ? Amortization.Build(_principal, _rate, first, termMonths: term) : null;
+    }
+}

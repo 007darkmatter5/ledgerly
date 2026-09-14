@@ -1,0 +1,104 @@
+@page "/Account/Manage/DeletePersonalData"
+
+@using Ledgerly.Services
+
+@inject UserManager<ApplicationUser> UserManager
+@inject AdminService Admin
+@inject SignInManager<ApplicationUser> SignInManager
+@inject IdentityRedirectManager RedirectManager
+@inject ILogger<DeletePersonalData> Logger
+
+<PageTitle>Delete account · Ledgerly</PageTitle>
+
+<StatusMessage Message="@message" />
+
+<h2 class="acct-subtitle">Delete account</h2>
+
+@if (isOnlyAdmin)
+{
+    <div class="acct-alert acct-alert-warning" role="alert">
+        <strong>You're Ledgerly's only admin.</strong> Before deleting your account,
+        <a href="Account/Manage/Admin/Users">make someone else an admin</a> so the app can still be managed.
+    </div>
+    return;
+}
+
+<div class="acct-alert acct-alert-danger" role="alert">
+    <strong>This permanently deletes your account and all of your data</strong>, including every account, bill,
+    income entry and loan in your ledger and your sample data. It can't be undone.
+</div>
+
+<EditForm Model="Input" FormName="delete-user" OnValidSubmit="OnValidSubmitAsync" method="post" class="acct-form">
+    <DataAnnotationsValidator />
+    <div class="acct-field">
+        <label for="Input.Password">Enter your password to confirm</label>
+        <InputText type="password" @bind-Value="Input.Password" id="Input.Password" class="acct-input" autocomplete="current-password" aria-required="true" />
+        <ValidationMessage For="() => Input.Password" />
+    </div>
+    <button class="acct-btn acct-btn-danger" type="submit">Delete my account and data</button>
+</EditForm>
+
+@code {
+    private string? message;
+    private ApplicationUser? user;
+    private bool isOnlyAdmin;
+
+    [CascadingParameter]
+    private HttpContext HttpContext { get; set; } = default!;
+
+    [SupplyParameterFromForm]
+    private InputModel Input { get; set; } = default!;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Input ??= new();
+
+        user = await UserManager.GetUserAsync(HttpContext.User);
+        if (user is null)
+        {
+            RedirectManager.RedirectToInvalidUser(UserManager, HttpContext);
+            return;
+        }
+
+        isOnlyAdmin = await Admin.IsOnlyAdminWithOtherUsersAsync(user);
+    }
+
+    private async Task OnValidSubmitAsync()
+    {
+        if (user is null)
+        {
+            RedirectManager.RedirectToInvalidUser(UserManager, HttpContext);
+            return;
+        }
+
+        if (isOnlyAdmin)
+            return;
+
+        if (!await UserManager.CheckPasswordAsync(user, Input.Password))
+        {
+            message = "Error: Incorrect password.";
+            return;
+        }
+
+        var userId = await UserManager.GetUserIdAsync(user);
+
+        // Ledgers (and everything in them) are removed by the database's cascade delete.
+        var result = await UserManager.DeleteAsync(user);
+        if (!result.Succeeded)
+        {
+            throw new InvalidOperationException("Unexpected error occurred deleting user.");
+        }
+
+        await SignInManager.SignOutAsync();
+        Logger.LogInformation("User with ID '{UserId}' deleted themselves.", userId);
+
+        RedirectManager.RedirectTo("Account/Login");
+    }
+
+    private sealed class InputModel
+    {
+        [Required]
+        [DataType(DataType.Password)]
+        public string Password { get; set; } = "";
+    }
+}

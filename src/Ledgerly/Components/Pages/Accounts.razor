@@ -1,0 +1,107 @@
+@page "/accounts"
+@inject LedgerService Ledger
+@inject IDialogService Dialogs
+@inject ISnackbar Snackbar
+
+<PageTitle>Accounts · Ledgerly</PageTitle>
+
+<MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-4" Wrap="Wrap.Wrap">
+    <MudStack Spacing="0">
+        <MudText Typo="Typo.h4">Accounts</MudText>
+        <MudText Typo="Typo.body2" Class="mud-text-secondary">Where bills are paid from and income lands. Keep balances current for accurate projections.</MudText>
+    </MudStack>
+    <MudSpacer />
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="() => EditAsync(null)">Add account</MudButton>
+</MudStack>
+
+<MudPaper Elevation="1">
+    <MudTable Items="_accounts" Hover="true" Loading="_loading" Breakpoint="Breakpoint.Sm" Elevation="0">
+        <HeaderContent>
+            <MudTh>Account</MudTh>
+            <MudTh>Type</MudTh>
+            <MudTh Style="text-align:right">Balance</MudTh>
+            <MudTh>As of</MudTh>
+            <MudTh Style="text-align:right">Low balance warning</MudTh>
+            <MudTh Style="text-align:right">Bills / month</MudTh>
+            <MudTh></MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd DataLabel="Account">
+                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                    <MudIcon Icon="@Display.Icon(context.Type)" Size="Size.Small" Color="Color.Primary" />
+                    <MudStack Spacing="0">
+                        <MudText Typo="Typo.body1" Class="@(context.IsActive ? null : "mud-text-disabled")">@context.Name</MudText>
+                        @if (!context.IsActive)
+                        {
+                            <MudText Typo="Typo.caption">Inactive</MudText>
+                        }
+                    </MudStack>
+                </MudStack>
+            </MudTd>
+            <MudTd DataLabel="Type">@Display.Of(context.Type)</MudTd>
+            <MudTd DataLabel="Balance" Style="text-align:right"><Money Value="context.Balance" /></MudTd>
+            <MudTd DataLabel="As of">@Display.Date(context.BalanceAsOf)</MudTd>
+            <MudTd DataLabel="Low balance warning" Style="text-align:right">@context.LowBalanceThreshold?.ToString("C")</MudTd>
+            <MudTd DataLabel="Bills / month" Style="text-align:right">@MonthlyBills(context.Id).ToString("C")</MudTd>
+            <MudTd Style="text-align:right; white-space:nowrap">
+                <MudTooltip Text="Running balance">
+                    <MudIconButton Icon="@Icons.Material.Filled.ShowChart" Size="Size.Small" Href="@($"projection?accounts={context.Id}")" aria-label="Running balance" />
+                </MudTooltip>
+                <MudTooltip Text="Update balance">
+                    <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="() => EditAsync(context)" aria-label="Edit" />
+                </MudTooltip>
+                <MudTooltip Text="Delete">
+                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="() => DeleteAsync(context)" aria-label="Delete" />
+                </MudTooltip>
+            </MudTd>
+        </RowTemplate>
+        <NoRecordsContent>
+            <MudText Class="py-6 mud-text-secondary">No accounts yet. Add the checking account you pay bills from to get started.</MudText>
+        </NoRecordsContent>
+    </MudTable>
+</MudPaper>
+
+@code {
+    private bool _loading = true;
+    private List<Account> _accounts = [];
+    private List<Bill> _bills = [];
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _accounts = await Ledger.GetAccountsAsync();
+        _bills = await Ledger.GetBillsAsync();
+        _loading = false;
+    }
+
+    private decimal MonthlyBills(int accountId) =>
+        _bills.Where(b => b.IsActive && b.PayFromAccountId == accountId).Sum(b => Recurrence.MonthlyEquivalent(b.Frequency, b.ExpectedAmount));
+
+    private async Task EditAsync(Account? account)
+    {
+        var parameters = new DialogParameters<AccountDialog> { { d => d.Model, account?.Copy() ?? new Account() } };
+        var dialog = await Dialogs.ShowAsync<AccountDialog>(account is null ? "Add account" : "Edit account", parameters,
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true });
+        if (await dialog.Result is { Canceled: false })
+        {
+            Snackbar.Add(account is null ? "Account added" : "Account saved", Severity.Success);
+            await LoadAsync();
+        }
+    }
+
+    private async Task DeleteAsync(Account account)
+    {
+        var bills = _bills.Count(b => b.PayFromAccountId == account.Id);
+        var confirmed = await Dialogs.ShowMessageBoxAsync("Delete account?",
+            $"Delete \"{account.Name}\"? Its income entries are deleted too" +
+            (bills > 0 ? $", and {bills} bill{(bills == 1 ? "" : "s")} will no longer have a pay-from account." : "."),
+            yesText: "Delete", cancelText: "Cancel");
+        if (confirmed != true)
+            return;
+
+        await Ledger.DeleteAccountAsync(account.Id);
+        Snackbar.Add("Account deleted", Severity.Info);
+        await LoadAsync();
+    }
+}

@@ -1,0 +1,217 @@
+@page "/bills"
+@inject LedgerService Ledger
+@inject IDialogService Dialogs
+@inject ISnackbar Snackbar
+
+<PageTitle>Bills · Ledgerly</PageTitle>
+
+<MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-4" Wrap="Wrap.Wrap">
+    <MudStack Spacing="0">
+        <MudText Typo="Typo.h4">Bills</MudText>
+        <MudText Typo="Typo.body2" Class="mud-text-secondary">What's due, how much it might be, and which account pays it.</MudText>
+    </MudStack>
+    <MudSpacer />
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="() => EditAsync(null)">Add bill</MudButton>
+</MudStack>
+
+<MudPaper Elevation="1" Class="pa-3 mb-3">
+    <MudStack Row="true" Spacing="3" AlignItems="AlignItems.Center" Wrap="Wrap.Wrap">
+        <MudSelect T="int?" @bind-Value="_accountFilter" Label="Paid from" Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:220px"
+                   ToStringFunc="@(id => id switch { null => "All accounts", 0 => "Not assigned", _ => _accounts.FirstOrDefault(a => a.Id == id)?.Name ?? "" })">
+            <MudSelectItem T="int?" Value="null">All accounts</MudSelectItem>
+            @foreach (var account in _accounts)
+            {
+                <MudSelectItem T="int?" Value="account.Id">@account.Name</MudSelectItem>
+            }
+            <MudSelectItem T="int?" Value="0">Not assigned</MudSelectItem>
+        </MudSelect>
+        <MudTextField @bind-Value="_search" Label="Search" Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" Immediate="true" Clearable="true" Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:220px" />
+        <MudSwitch @bind-Value="_showInactive" Label="Show inactive" Color="Color.Primary" />
+    </MudStack>
+</MudPaper>
+
+<MudTabs Elevation="1" Rounded="true" TabPanelsClass="pa-2" @bind-ActivePanelIndex="_tab">
+    <MudTabPanel Text="All bills" Icon="@Icons.Material.Filled.List">
+        <MudTable Items="FilteredBills" Hover="true" Loading="_loading" Breakpoint="Breakpoint.Sm" Elevation="0">
+            <HeaderContent>
+                <MudTh><MudTableSortLabel SortBy="_byName" InitialDirection="SortDirection.Ascending">Bill</MudTableSortLabel></MudTh>
+                <MudTh><MudTableSortLabel SortBy="_byCategory">Category</MudTableSortLabel></MudTh>
+                <MudTh Style="text-align:right"><MudTableSortLabel SortBy="_byAmount">Amount</MudTableSortLabel></MudTh>
+                <MudTh>Repeats</MudTh>
+                <MudTh><MudTableSortLabel SortBy="_byNextDue">Next due</MudTableSortLabel></MudTh>
+                <MudTh>Paid from</MudTh>
+                <MudTh Style="text-align:right"><MudTableSortLabel SortBy="_byMonthly">Per month</MudTableSortLabel></MudTh>
+                <MudTh></MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd DataLabel="Bill">
+                    <MudText Typo="Typo.body1" Class="@(context.IsActive ? null : "mud-text-disabled")">@context.Name</MudText>
+                    <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center">
+                        @if (!string.IsNullOrWhiteSpace(context.Payee))
+                        {
+                            <MudText Typo="Typo.caption" Class="mud-text-secondary">@context.Payee</MudText>
+                        }
+                        @if (context.AutoPay)
+                        {
+                            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Info">Autopay</MudChip>
+                        }
+                        @if (context.Loan is not null)
+                        {
+                            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Href="@($"loans/{context.Loan.Id}")" Icon="@Icons.Material.Filled.RealEstateAgent">@context.Loan.Name@(context.LoanPaymentKind == LoanPaymentKind.ExtraPrincipal ? " · extra" : "")</MudChip>
+                        }
+                        @if (!context.IsActive)
+                        {
+                            <MudChip T="string" Size="Size.Small">Inactive</MudChip>
+                        }
+                    </MudStack>
+                </MudTd>
+                <MudTd DataLabel="Category">@context.Category</MudTd>
+                <MudTd DataLabel="Amount" Style="text-align:right; white-space:nowrap">
+                    @context.ExpectedAmount.ToString("C")
+                    @if (context.IsVariable)
+                    {
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">up to @context.MaxAmount?.ToString("C")</MudText>
+                    }
+                </MudTd>
+                <MudTd DataLabel="Repeats">@Display.Of(context.Frequency)</MudTd>
+                <MudTd DataLabel="Next due">
+                    @if (NextDue(context) is { } next)
+                    {
+                        <MudText Typo="Typo.body2">@Display.Date(next)</MudText>
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary">@Display.Relative(next, Ledger.Today)</MudText>
+                    }
+                    else
+                    {
+                        <MudText Typo="Typo.body2" Class="mud-text-secondary">Ended</MudText>
+                    }
+                </MudTd>
+                <MudTd DataLabel="Paid from">
+                    @if (context.PayFromAccount is { } account)
+                    {
+                        @account.Name
+                    }
+                    else
+                    {
+                        <MudText Typo="Typo.body2" Color="Color.Warning">Not assigned</MudText>
+                    }
+                </MudTd>
+                <MudTd DataLabel="Per month" Style="text-align:right">@Monthly(context).ToString("C")</MudTd>
+                <MudTd Style="text-align:right; white-space:nowrap">
+                    <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="() => EditAsync(context)" aria-label="Edit" />
+                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="() => DeleteAsync(context)" aria-label="Delete" />
+                </MudTd>
+            </RowTemplate>
+            <FooterContent>
+                <MudTd colspan="6" Style="text-align:right"><strong>Total per month (active)</strong></MudTd>
+                <MudTd Style="text-align:right"><strong>@FilteredBills.Where(b => b.IsActive).Sum(Monthly).ToString("C")</strong></MudTd>
+                <MudTd />
+            </FooterContent>
+            <NoRecordsContent>
+                <MudText Class="py-6 mud-text-secondary">@(_bills.Count == 0 ? "No bills yet. Add rent, utilities, subscriptions, loan payments…" : "No bills match these filters.")</MudText>
+            </NoRecordsContent>
+        </MudTable>
+    </MudTabPanel>
+
+    <MudTabPanel Text="Schedule" Icon="@Icons.Material.Filled.CalendarMonth">
+        <MudStack Row="true" AlignItems="AlignItems.Center" Class="px-2 pt-2" Wrap="Wrap.Wrap">
+            <MudIconButton Icon="@Icons.Material.Filled.ChevronLeft" OnClick="() => _month = _month.AddMonths(-1)" aria-label="Previous month" />
+            <MudText Typo="Typo.h6" Style="min-width:160px; text-align:center">@_month.ToString("MMMM yyyy")</MudText>
+            <MudIconButton Icon="@Icons.Material.Filled.ChevronRight" OnClick="() => _month = _month.AddMonths(1)" aria-label="Next month" />
+            <MudButton Size="Size.Small" OnClick="() => _month = ThisMonth" Disabled="_month == ThisMonth">This month</MudButton>
+            <MudSpacer />
+            <MudStack Row="true" Spacing="4">
+                <MudStack Spacing="0" AlignItems="AlignItems.End">
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary">Total</MudText>
+                    <MudText Typo="Typo.subtitle1">@MonthSchedule.Sum(d => d.Amount).ToString("C")</MudText>
+                </MudStack>
+                <MudStack Spacing="0" AlignItems="AlignItems.End">
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary">Paid</MudText>
+                    <MudText Typo="Typo.subtitle1" Color="Color.Success">@MonthSchedule.Where(d => d.IsPaid).Sum(d => d.Amount).ToString("C")</MudText>
+                </MudStack>
+                <MudStack Spacing="0" AlignItems="AlignItems.End">
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary">Remaining</MudText>
+                    <MudText Typo="Typo.subtitle1">@MonthSchedule.Where(d => !d.IsPaid).Sum(d => d.Amount).ToString("C")</MudText>
+                </MudStack>
+            </MudStack>
+        </MudStack>
+        <BillDueTable Items="MonthSchedule" OnChanged="LoadAsync" EmptyText="No bills due this month." />
+    </MudTabPanel>
+</MudTabs>
+
+@code {
+    private bool _loading = true;
+    private List<Bill> _bills = [];
+    private List<Account> _accounts = [];
+    private int? _accountFilter;
+    private string? _search;
+    private bool _showInactive;
+    private int _tab;
+    private DateOnly _month;
+
+    private readonly Func<Bill, object> _byName = b => b.Name;
+    private readonly Func<Bill, object> _byCategory = b => b.Category ?? "";
+    private readonly Func<Bill, object> _byAmount = b => b.ExpectedAmount;
+    private readonly Func<Bill, object> _byMonthly = b => Monthly(b);
+    private Func<Bill, object> _byNextDue = null!;
+
+    private DateOnly ThisMonth => new(Ledger.Today.Year, Ledger.Today.Month, 1);
+
+    private IEnumerable<Bill> FilteredBills => _bills.Where(b =>
+        (_showInactive || b.IsActive)
+        && (_accountFilter is null || (b.PayFromAccountId ?? 0) == _accountFilter)
+        && (string.IsNullOrWhiteSpace(_search)
+            || b.Name.Contains(_search, StringComparison.OrdinalIgnoreCase)
+            || (b.Payee?.Contains(_search, StringComparison.OrdinalIgnoreCase) ?? false)
+            || (b.Category?.Contains(_search, StringComparison.OrdinalIgnoreCase) ?? false)));
+
+    private List<BillDue> MonthSchedule => BillSchedule.Between(FilteredBills, _month, _month.AddMonths(1).AddDays(-1)).ToList();
+
+    protected override async Task OnInitializedAsync()
+    {
+        _month = ThisMonth;
+        _byNextDue = b => NextDue(b) ?? DateOnly.MaxValue;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _bills = await Ledger.GetBillsAsync();
+        _accounts = await Ledger.GetAccountsAsync();
+        _loading = false;
+    }
+
+    private DateOnly? NextDue(Bill bill) => Recurrence.Next(bill.Frequency, bill.StartDate, bill.EndDate, Ledger.Today);
+
+    private static decimal Monthly(Bill bill) => Recurrence.MonthlyEquivalent(bill.Frequency, bill.ExpectedAmount);
+
+    private async Task EditAsync(Bill? bill)
+    {
+        var categories = _bills.Select(b => b.Category).OfType<string>().Distinct().Order().ToList();
+        var model = bill?.Copy() ?? new Bill { PayFromAccountId = _accountFilter is > 0 ? _accountFilter : null };
+        var parameters = new DialogParameters<BillDialog>
+        {
+            { d => d.Model, model },
+            { d => d.Categories, categories }
+        };
+        var dialog = await Dialogs.ShowAsync<BillDialog>(bill is null ? "Add bill" : "Edit bill", parameters,
+            new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true });
+        if (await dialog.Result is { Canceled: false })
+        {
+            Snackbar.Add(bill is null ? "Bill added" : "Bill saved", Severity.Success);
+            await LoadAsync();
+        }
+    }
+
+    private async Task DeleteAsync(Bill bill)
+    {
+        var confirmed = await Dialogs.ShowMessageBoxAsync("Delete bill?",
+            $"Delete \"{bill.Name}\" and its payment history? To stop it without losing history, edit it and turn off Active instead.",
+            yesText: "Delete", cancelText: "Cancel");
+        if (confirmed != true)
+            return;
+
+        await Ledger.DeleteBillAsync(bill.Id);
+        Snackbar.Add("Bill deleted", Severity.Info);
+        await LoadAsync();
+    }
+}

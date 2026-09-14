@@ -1,0 +1,71 @@
+@inject LedgerService Ledger
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">Record an extra payment</MudText>
+        <MudText Typo="Typo.body2" Class="mud-text-secondary">@Loan.Name · goes entirely toward the principal balance</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudForm @ref="_form">
+            <MudGrid Spacing="2">
+                <MudItem xs="12" sm="6">
+                    <MudNumericField @bind-Value="_amount" Label="Amount" Format="N2" Min="0.01m" Adornment="Adornment.Start" AdornmentText="$" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                     Required="true" RequiredError="Enter the amount paid" />
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <DateOnlyPicker @bind-Value="_paidOn" Label="Paid on" Required="true" />
+                </MudItem>
+                <MudItem xs="12">
+                    <MudSelect T="int?" @bind-Value="_accountId" Label="Paid from account" Variant="Variant.Outlined" Margin="Margin.Dense"
+                               ToStringFunc="@(id => _accounts.FirstOrDefault(a => a.Id == id)?.Name ?? "Not tracked")"
+                               HelperText="Also shows the payment in that account's running balance">
+                        <MudSelectItem T="int?" Value="null">Not tracked</MudSelectItem>
+                        @foreach (var account in _accounts)
+                        {
+                            <MudSelectItem T="int?" Value="account.Id">@account.Name</MudSelectItem>
+                        }
+                    </MudSelect>
+                </MudItem>
+                <MudItem xs="12">
+                    <MudTextField @bind-Value="_notes" Label="Notes" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                </MudItem>
+            </MudGrid>
+        </MudForm>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => MudDialog.Cancel()">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveAsync">Record payment</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = null!;
+    [Parameter, EditorRequired] public Loan Loan { get; set; } = null!;
+
+    /// <summary>Preselects the account the loan's monthly bill is paid from.</summary>
+    [Parameter] public int? DefaultAccountId { get; set; }
+
+    private MudForm _form = null!;
+    private List<Account> _accounts = [];
+    private decimal? _amount;
+    private DateOnly? _paidOn;
+    private int? _accountId;
+    private string? _notes;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _paidOn = Ledger.Today;
+        _accountId = DefaultAccountId;
+        _accounts = await Ledger.GetAccountsAsync(activeOnly: true);
+    }
+
+    private async Task SaveAsync()
+    {
+        await _form.ValidateAsync();
+        if (!_form.IsValid || _amount is not > 0 || _paidOn is null)
+            return;
+
+        await Ledger.RecordExtraLoanPaymentAsync(Loan.Id, _accountId, _amount.Value, _paidOn.Value, _notes);
+        MudDialog.Close(DialogResult.Ok(true));
+    }
+}

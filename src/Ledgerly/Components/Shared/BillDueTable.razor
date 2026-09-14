@@ -1,0 +1,114 @@
+@inject IDialogService Dialogs
+@inject LedgerService Ledger
+
+<MudTable Items="Items" Dense="true" Hover="true" Elevation="0" Breakpoint="Breakpoint.Sm">
+    <HeaderContent>
+        <MudTh>Due</MudTh>
+        <MudTh>Bill</MudTh>
+        @if (ShowAccount)
+        {
+            <MudTh>Paid from</MudTh>
+        }
+        <MudTh Style="text-align:right">Amount</MudTh>
+        <MudTh>Status</MudTh>
+        <MudTh></MudTh>
+    </HeaderContent>
+    <RowTemplate>
+        <MudTd DataLabel="Due">
+            <MudText Typo="Typo.body2">@Display.ShortDate(context.DueDate)</MudText>
+            <MudText Typo="Typo.caption" Class="mud-text-secondary">@Display.Relative(context.DueDate, Ledger.Today)</MudText>
+        </MudTd>
+        <MudTd DataLabel="Bill">
+            <MudText Typo="Typo.body2">@context.Bill.Name</MudText>
+            @if (context.Bill.Loan is { } loan)
+            {
+                var kind = LoanPayments.KindOf(context.Bill, context.Occurrence);
+                var extra = LoanPayments.ExtraPortion(context.Bill, kind, context.Amount);
+                <MudText Typo="Typo.caption" Class="@(extra > 0 ? "mud-success-text" : "mud-text-secondary")">
+                    @loan.Name · @(kind == LoanPaymentKind.ExtraPrincipal ? "extra to principal" : extra > 0 ? $"monthly payment + {extra:C} extra" : "monthly payment")
+                </MudText>
+            }
+            @if (!string.IsNullOrWhiteSpace(context.Occurrence?.Notes))
+            {
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">@context.Occurrence.Notes</MudText>
+            }
+        </MudTd>
+        @if (ShowAccount)
+        {
+            <MudTd DataLabel="Paid from">
+                @if (context.Bill.PayFromAccount is { } account)
+                {
+                    @account.Name
+                }
+                else
+                {
+                    <MudText Typo="Typo.body2" Color="Color.Warning">Not assigned</MudText>
+                }
+            </MudTd>
+        }
+        <MudTd DataLabel="Amount" Style="text-align:right">
+            @if (context.IsEstimate)
+            {
+                <MudTooltip Text="@($"Estimate: up to {context.Bill.MaxAmount:C}")">
+                    <span>≈ @context.Amount.ToString("C")</span>
+                </MudTooltip>
+            }
+            else
+            {
+                @context.Amount.ToString("C")
+            }
+        </MudTd>
+        <MudTd DataLabel="Status">
+            @if (context.IsPaid)
+            {
+                <MudChip T="string" Size="Size.Small" Color="Color.Success" Icon="@Icons.Material.Filled.Check">Paid @context.Occurrence!.PaidOn!.Value.ToString("M/d")</MudChip>
+            }
+            else if (context.IsOverdue(Ledger.Today))
+            {
+                <MudChip T="string" Size="Size.Small" Color="Color.Error">Overdue</MudChip>
+            }
+            else if (context.Bill.AutoPay)
+            {
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Info">Autopay</MudChip>
+            }
+            else
+            {
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">Unpaid</MudChip>
+            }
+        </MudTd>
+        <MudTd Style="text-align:right; white-space:nowrap">
+            @if (!context.IsPaid)
+            {
+                <MudTooltip Text="Mark paid">
+                    <MudIconButton Icon="@Icons.Material.Filled.TaskAlt" Color="Color.Success" Size="Size.Small" OnClick="() => OpenAsync(context, markPaid: true)" aria-label="Mark paid" />
+                </MudTooltip>
+            }
+            <MudTooltip Text="Amount, payment & notes">
+                <MudIconButton Icon="@Icons.Material.Filled.EditNote" Size="Size.Small" OnClick="() => OpenAsync(context, markPaid: false)" aria-label="Edit this due date" />
+            </MudTooltip>
+        </MudTd>
+    </RowTemplate>
+    <NoRecordsContent>
+        <MudText Typo="Typo.body2" Class="mud-text-secondary py-4">@EmptyText</MudText>
+    </NoRecordsContent>
+</MudTable>
+
+@code {
+    [Parameter, EditorRequired] public IEnumerable<BillDue> Items { get; set; } = [];
+    [Parameter] public bool ShowAccount { get; set; } = true;
+    [Parameter] public string EmptyText { get; set; } = "Nothing due.";
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    private async Task OpenAsync(BillDue due, bool markPaid)
+    {
+        var parameters = new DialogParameters<RecordPaymentDialog>
+        {
+            { d => d.Due, due },
+            { d => d.MarkPaid, markPaid }
+        };
+        var dialog = await Dialogs.ShowAsync<RecordPaymentDialog>(null, parameters, new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true });
+        var result = await dialog.Result;
+        if (result is { Canceled: false })
+            await OnChanged.InvokeAsync();
+    }
+}

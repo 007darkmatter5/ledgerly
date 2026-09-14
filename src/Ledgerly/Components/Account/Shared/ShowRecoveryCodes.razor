@@ -1,0 +1,22 @@
+<StatusMessage Message="@StatusMessage" />
+<h2 class="acct-subtitle">Recovery codes</h2>
+<div class="acct-alert acct-alert-warning" role="alert">
+    <strong>Put these codes in a safe place.</strong>
+    If you lose your authenticator device and don't have these codes, you will lose access to your account.
+    Each code works once.
+</div>
+<div class="acct-codes">
+    @foreach (var recoveryCode in RecoveryCodes)
+    {
+        <code>@recoveryCode</code>
+    }
+</div>
+<a href="Account/Manage/TwoFactorAuthentication" class="acct-btn acct-btn-primary">Done</a>
+
+@code {
+    [Parameter]
+    public string[] RecoveryCodes { get; set; } = [];
+
+    [Parameter]
+    public string? StatusMessage { get; set; }
+}

@@ -1,0 +1,101 @@
+@page "/income"
+@inject LedgerService Ledger
+@inject IDialogService Dialogs
+@inject ISnackbar Snackbar
+
+<PageTitle>Income · Ledgerly</PageTitle>
+
+<MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-4" Wrap="Wrap.Wrap">
+    <MudStack Spacing="0">
+        <MudText Typo="Typo.h4">Income</MudText>
+        <MudText Typo="Typo.body2" Class="mud-text-secondary">Paychecks and other deposits, so running balances include money coming in.</MudText>
+    </MudStack>
+    <MudSpacer />
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="() => EditAsync(null)">Add income</MudButton>
+</MudStack>
+
+<MudPaper Elevation="1">
+    <MudTable Items="_incomes" Hover="true" Loading="_loading" Breakpoint="Breakpoint.Sm" Elevation="0">
+        <HeaderContent>
+            <MudTh>Income</MudTh>
+            <MudTh Style="text-align:right">Amount</MudTh>
+            <MudTh>Repeats</MudTh>
+            <MudTh>Next</MudTh>
+            <MudTh>Deposited to</MudTh>
+            <MudTh Style="text-align:right">Per month</MudTh>
+            <MudTh></MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd DataLabel="Income">
+                <MudText Class="@(context.IsActive ? null : "mud-text-disabled")">@context.Name</MudText>
+                @if (!context.IsActive)
+                {
+                    <MudText Typo="Typo.caption">Inactive</MudText>
+                }
+            </MudTd>
+            <MudTd DataLabel="Amount" Style="text-align:right"><Money Value="context.Amount" ColorPositive="true" /></MudTd>
+            <MudTd DataLabel="Repeats">@Display.Of(context.Frequency)</MudTd>
+            <MudTd DataLabel="Next">
+                @if (Recurrence.Next(context.Frequency, context.StartDate, context.EndDate, Ledger.Today) is { } next)
+                {
+                    <MudText Typo="Typo.body2">@Display.Date(next)</MudText>
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary">@Display.Relative(next, Ledger.Today)</MudText>
+                }
+                else
+                {
+                    <MudText Typo="Typo.body2" Class="mud-text-secondary">Ended</MudText>
+                }
+            </MudTd>
+            <MudTd DataLabel="Deposited to">@context.DepositToAccount?.Name</MudTd>
+            <MudTd DataLabel="Per month" Style="text-align:right">@Recurrence.MonthlyEquivalent(context.Frequency, context.Amount).ToString("C")</MudTd>
+            <MudTd Style="text-align:right; white-space:nowrap">
+                <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="() => EditAsync(context)" aria-label="Edit" />
+                <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="() => DeleteAsync(context)" aria-label="Delete" />
+            </MudTd>
+        </RowTemplate>
+        <FooterContent>
+            <MudTd colspan="5" Style="text-align:right"><strong>Total per month (active)</strong></MudTd>
+            <MudTd Style="text-align:right"><strong>@_incomes.Where(i => i.IsActive).Sum(i => Recurrence.MonthlyEquivalent(i.Frequency, i.Amount)).ToString("C")</strong></MudTd>
+            <MudTd />
+        </FooterContent>
+        <NoRecordsContent>
+            <MudText Class="py-6 mud-text-secondary">No income yet. Add your paycheck so projections show money coming in.</MudText>
+        </NoRecordsContent>
+    </MudTable>
+</MudPaper>
+
+@code {
+    private bool _loading = true;
+    private List<Income> _incomes = [];
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _incomes = await Ledger.GetIncomesAsync();
+        _loading = false;
+    }
+
+    private async Task EditAsync(Income? income)
+    {
+        var parameters = new DialogParameters<IncomeDialog> { { d => d.Model, income?.Copy() ?? new Income() } };
+        var dialog = await Dialogs.ShowAsync<IncomeDialog>(income is null ? "Add income" : "Edit income", parameters,
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true });
+        if (await dialog.Result is { Canceled: false })
+        {
+            Snackbar.Add(income is null ? "Income added" : "Income saved", Severity.Success);
+            await LoadAsync();
+        }
+    }
+
+    private async Task DeleteAsync(Income income)
+    {
+        var confirmed = await Dialogs.ShowMessageBoxAsync("Delete income?", $"Delete \"{income.Name}\"?", yesText: "Delete", cancelText: "Cancel");
+        if (confirmed != true)
+            return;
+
+        await Ledger.DeleteIncomeAsync(income.Id);
+        Snackbar.Add("Income deleted", Severity.Info);
+        await LoadAsync();
+    }
+}

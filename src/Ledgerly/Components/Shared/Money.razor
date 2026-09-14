@@ -1,0 +1,14 @@
+<span class="@CssClass">@Value.ToString("C")</span>
+
+@code {
+    [Parameter, EditorRequired] public decimal Value { get; set; }
+
+    /// <summary>Colors negative values red, and positive values green when <see cref="ColorPositive"/> is set.</summary>
+    [Parameter] public bool Colored { get; set; } = true;
+
+    [Parameter] public bool ColorPositive { get; set; }
+    [Parameter] public string? Class { get; set; }
+
+    private string CssClass =>
+        $"{Class} {(Colored && Value < 0 ? "mud-error-text" : Colored && ColorPositive && Value > 0 ? "mud-success-text" : "")}".Trim();
+}

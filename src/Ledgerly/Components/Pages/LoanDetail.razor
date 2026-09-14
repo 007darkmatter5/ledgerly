@@ -1,0 +1,358 @@
+@page "/loans/{Id:int}"
+@inject LedgerService Ledger
+@inject IDialogService Dialogs
+@inject ISnackbar Snackbar
+@inject NavigationManager Navigation
+
+<PageTitle>@(_loan?.Name ?? "Loan") · Ledgerly</PageTitle>
+
+<MudBreadcrumbs Items="_breadcrumbs" Class="px-0 pt-0" />
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+    return;
+}
+
+@if (_loan is null)
+{
+    <MudAlert Severity="Severity.Warning">That loan doesn't exist. <MudLink Href="loans">Back to loans</MudLink></MudAlert>
+    return;
+}
+
+<MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-4" Wrap="Wrap.Wrap">
+    <MudStack Spacing="0">
+        <MudText Typo="Typo.h4">@_loan.Name</MudText>
+        <MudText Typo="Typo.body2" Class="mud-text-secondary">
+            @Display.Of(_loan.Type)@(string.IsNullOrWhiteSpace(_loan.Lender) ? "" : $" · {_loan.Lender}")
+            · @_loan.OriginalPrincipal.ToString("C0") at @_loan.AnnualRatePercent.ToString("0.###")% for @Display.Months(_loan.TermMonths)
+            · first payment @Display.Date(_loan.FirstPaymentDate)
+        </MudText>
+    </MudStack>
+    <MudSpacer />
+    <MudStack Row="true" Spacing="2">
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.AddCard" OnClick="RecordExtraPaymentAsync">Record extra payment</MudButton>
+        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Edit" OnClick="EditAsync">Edit loan</MudButton>
+    </MudStack>
+</MudStack>
+
+<MudGrid Spacing="3" Class="mb-2">
+    <MudItem xs="12" md="7">
+        <MudPaper Elevation="1" Class="pa-4" Style="height:100%">
+            <MudStack Row="true" Spacing="6" Wrap="Wrap.Wrap">
+                <MudStack Spacing="0">
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary">Current balance</MudText>
+                    <MudText Typo="Typo.h5">@_balance.ToString("C")</MudText>
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                        @(_loan.CurrentBalance is null ? "Estimated from the schedule" : $"From lender's {Display.Date(_loan.BalanceAsOf ?? _loan.FirstPaymentDate)} balance")
+                        @(_extraApplied > 0 ? $" · includes {_extraApplied:C} extra paid" : "")
+                    </MudText>
+                </MudStack>
+                <MudStack Spacing="0">
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary">On the original schedule</MudText>
+                    <MudText Typo="Typo.h6">@_scheduledBalance.ToString("C")</MudText>
+                    @if (_scheduledBalance != _balance)
+                    {
+                        var ahead = _scheduledBalance - _balance;
+                        <MudText Typo="Typo.caption" Class="@(ahead >= 0 ? "mud-success-text" : "mud-warning-text")">
+                            @(ahead >= 0 ? $"{ahead:C} ahead of schedule" : $"{-ahead:C} behind schedule")
+                        </MudText>
+                    }
+                </MudStack>
+                <MudStack Spacing="0">
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary">Principal paid</MudText>
+                    <MudText Typo="Typo.h6">@((_loan.OriginalPrincipal - _balance).ToString("C"))</MudText>
+                </MudStack>
+            </MudStack>
+            <MudProgressLinear Value="@(Math.Clamp(_paidPercent, 0, 100))" Color="Color.Primary" Rounded="true" Size="Size.Medium" Class="mt-4" />
+            <MudText Typo="Typo.caption" Class="mud-text-secondary">@_paidPercent.ToString("0.0")% paid off</MudText>
+
+            @if (_extraApplied > 0 && _interestSaved > 0)
+            {
+                <MudAlert Severity="Severity.Success" Dense="true" Class="mt-3" Icon="@Icons.Material.Filled.Savings">
+                    Your extra payments so far save about <strong>@_interestSaved.ToString("C")</strong> in interest
+                    @(_monthsSaved > 0 ? $"and pay the loan off {Display.Months(_monthsSaved)} sooner" : "").
+                </MudAlert>
+            }
+        </MudPaper>
+    </MudItem>
+
+    <MudItem xs="12" md="5">
+        <MudPaper Elevation="1" Class="pa-4" Style="height:100%">
+            <MudText Typo="Typo.subtitle1" Class="mb-2">Bills for this loan</MudText>
+            @if (_bills.Count == 0)
+            {
+                <MudText Typo="Typo.body2" Class="mud-text-secondary mb-3">No bill pays this loan yet. Add one so payments show up in your account's running balance.</MudText>
+            }
+            @foreach (var bill in _bills)
+            {
+                <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center" Class="mb-2">
+                    <MudStack Spacing="0">
+                        <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center">
+                            <MudText Typo="Typo.body2">@bill.Name · @bill.ExpectedAmount.ToString("C")</MudText>
+                            <LoanPaymentChip Kind="bill.LoanPaymentKind" />
+                        </MudStack>
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                            @Display.Of(bill.Frequency) from @(bill.PayFromAccount?.Name ?? "no account")@(bill.AutoPay ? " · autopay" : "")@(bill.IsActive ? "" : " · inactive")
+                        </MudText>
+                        @if (bill.LoanPaymentKind == LoanPaymentKind.MonthlyPayment && bill.ExpectedAmount != MonthlyAmount)
+                        {
+                            <MudText Typo="Typo.caption" Color="Color.Warning">Differs from the loan payment of @MonthlyAmount.ToString("C"); may include escrow or fees.</MudText>
+                        }
+                    </MudStack>
+                    <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="() => EditBillAsync(bill)" aria-label="Edit bill" />
+                </MudStack>
+            }
+            <MudStack Row="true" Spacing="2" Wrap="Wrap.Wrap" Class="mt-2">
+                @if (!_bills.Any(b => b.LoanPaymentKind == LoanPaymentKind.MonthlyPayment && b.IsActive))
+                {
+                    <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.Add" OnClick="() => CreateBillAsync(LoanPaymentKind.MonthlyPayment)">Monthly payment bill</MudButton>
+                }
+                <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.Add" OnClick="() => CreateBillAsync(LoanPaymentKind.ExtraPrincipal)">Scheduled extra payment</MudButton>
+            </MudStack>
+        </MudPaper>
+    </MudItem>
+
+    @if (_history.Count > 0)
+    {
+        <MudItem xs="12">
+            <MudPaper Elevation="1">
+                <MudStack Row="true" AlignItems="AlignItems.Center" Class="px-4 pt-3">
+                    <MudText Typo="Typo.subtitle1">Payments</MudText>
+                    <MudSpacer />
+                    <MudText Typo="Typo.body2" Class="mud-text-secondary">Extra toward principal: <strong class="mud-success-text">@_extraPaid.ToString("C")</strong></MudText>
+                </MudStack>
+                <MudText Typo="Typo.caption" Class="mud-text-secondary px-4 d-block">
+                    Monthly payments are assumed made on schedule. Extra payments and payments marked paid are listed here.
+                </MudText>
+                <MudTable Items="_history" Dense="true" Hover="true" Breakpoint="Breakpoint.Sm" Elevation="0" RowsPerPage="10">
+                    <HeaderContent>
+                        <MudTh>Paid</MudTh>
+                        <MudTh>Bill</MudTh>
+                        <MudTh>Type</MudTh>
+                        <MudTh Style="text-align:right">Amount</MudTh>
+                        <MudTh Style="text-align:right">Monthly payment</MudTh>
+                        <MudTh Style="text-align:right">Extra to principal</MudTh>
+                    </HeaderContent>
+                    <RowTemplate>
+                        <MudTd DataLabel="Paid">
+                            @Display.Date(context.Date)
+                            @if (context.IsAssumed)
+                            {
+                                <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">Autopay</MudText>
+                            }
+                        </MudTd>
+                        <MudTd DataLabel="Bill">@context.Bill.Name</MudTd>
+                        <MudTd DataLabel="Type"><LoanPaymentChip Kind="context.Kind" /></MudTd>
+                        <MudTd DataLabel="Amount" Style="text-align:right">@context.Amount.ToString("C")</MudTd>
+                        <MudTd DataLabel="Monthly payment" Style="text-align:right">@(context.MonthlyPortion > 0 ? context.MonthlyPortion.ToString("C") : "—")</MudTd>
+                        <MudTd DataLabel="Extra to principal" Style="text-align:right">
+                            @if (context.ExtraPrincipal > 0)
+                            {
+                                <span class="mud-success-text">@context.ExtraPrincipal.ToString("C")</span>
+                            }
+                            else
+                            {
+                                <span>—</span>
+                            }
+                        </MudTd>
+                    </RowTemplate>
+                    <PagerContent>
+                        <MudTablePager PageSizeOptions="[10, 25, 100]" />
+                    </PagerContent>
+                </MudTable>
+            </MudPaper>
+        </MudItem>
+    }
+</MudGrid>
+
+<MudTabs Elevation="0" Rounded="true" @bind-ActivePanelIndex="_tab" Class="mb-2">
+    <MudTabPanel Text="Remaining payments" Icon="@Icons.Material.Filled.Upcoming" />
+    <MudTabPanel Text="Full schedule" Icon="@Icons.Material.Filled.History" />
+</MudTabs>
+
+<MudPaper Elevation="1" Class="pa-3 mb-3">
+    <MudStack Row="true" Spacing="3" AlignItems="AlignItems.Center" Wrap="Wrap.Wrap">
+        <MudIcon Icon="@Icons.Material.Filled.Science" Color="Color.Secondary" />
+        <MudText Typo="Typo.body2">What if I paid extra principal each month?</MudText>
+        <MudNumericField T="decimal" Value="_whatIfExtra" ValueChanged="OnWhatIfChanged" Format="N2" Min="0m" Step="25m" Adornment="Adornment.Start" AdornmentText="$"
+                         Variant="Variant.Outlined" Margin="Margin.Dense" Style="max-width:160px" />
+        @if (_whatIfExtra != _loan.ExtraPrincipal)
+        {
+            <MudButton Size="Size.Small" OnClick="() => OnWhatIfChanged(_loan.ExtraPrincipal)">Reset</MudButton>
+            <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Secondary" OnClick="SaveExtraAsync">Save as my extra payment</MudButton>
+        }
+    </MudStack>
+</MudPaper>
+
+@if (_tab == 0)
+{
+    <AmortizationView Schedule="_remaining" Comparison="_remainingNoExtra" ExtraPrincipal="_whatIfExtra" />
+}
+else
+{
+    <AmortizationView Schedule="_original" Comparison="_originalNoExtra" ExtraPrincipal="_whatIfExtra" HighlightMonth="Ledger.Today" />
+}
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    private bool _loading = true;
+    private Loan? _loan;
+    private List<Bill> _bills = [];
+    private List<LoanPayment> _history = [];
+    private List<ExtraPayment> _extras = [];
+    private int _tab;
+    private decimal _whatIfExtra;
+    private decimal _balance;
+    private decimal _scheduledBalance;
+    private decimal _extraPaid;
+    private decimal _extraApplied;
+    private decimal _interestSaved;
+    private int _monthsSaved;
+    private double _paidPercent;
+
+    private AmortizationSchedule _remaining = null!;
+    private AmortizationSchedule _remainingNoExtra = null!;
+    private AmortizationSchedule _original = null!;
+    private AmortizationSchedule _originalNoExtra = null!;
+
+    private List<BreadcrumbItem> _breadcrumbs = [];
+
+    private decimal MonthlyAmount => LoanMath.Payment(_loan!) + _loan!.ExtraPrincipal;
+
+    protected override async Task OnParametersSetAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loan = await Ledger.GetLoanAsync(Id);
+        if (_loan is not null)
+        {
+            _bills = (await Ledger.GetBillsAsync()).Where(b => b.LoanId == Id).ToList();
+            var today = Ledger.Today;
+            var payments = LoanPayments.For(_loan, _bills, today);
+
+            // Assumed autopay monthly payments add nothing new, so the history lists everything else.
+            _history = payments.Where(p => !p.IsAssumed || p.ExtraPrincipal > 0).OrderByDescending(p => p.Date).ToList();
+            _extras = LoanPayments.ExtrasFor(_loan, _bills, today);
+            _extraPaid = _extras.Sum(e => e.Amount);
+            // A lender-reported balance already includes extra payments made before its date.
+            _extraApplied = _loan.CurrentBalance is null
+                ? _extraPaid
+                : _extras.Where(e => e.Date > (_loan.BalanceAsOf ?? _loan.FirstPaymentDate)).Sum(e => e.Amount);
+            _whatIfExtra = _loan.ExtraPrincipal;
+            Calculate();
+            _breadcrumbs = [new("Loans", href: "loans"), new(_loan.Name, href: null, disabled: true)];
+        }
+        _loading = false;
+    }
+
+    private void OnWhatIfChanged(decimal extra)
+    {
+        _whatIfExtra = Math.Max(0m, extra);
+        Calculate();
+    }
+
+    private void Calculate()
+    {
+        var today = Ledger.Today;
+        var withExtra = _loan!.Copy();
+        withExtra.ExtraPrincipal = _whatIfExtra;
+
+        _balance = LoanMath.CurrentBalance(_loan, today, _extras);
+        _scheduledBalance = LoanMath.OriginalSchedule(_loan, []).BalanceOn(today);
+        _paidPercent = _loan.OriginalPrincipal > 0 ? (double)((_loan.OriginalPrincipal - _balance) / _loan.OriginalPrincipal * 100m) : 0;
+
+        // What the extra payments made so far are worth over the life of the loan.
+        var withPaidExtras = LoanMath.ActualSchedule(_loan, _extras);
+        var withoutPaidExtras = LoanMath.ActualSchedule(_loan, []);
+        _interestSaved = withoutPaidExtras.TotalInterest - withPaidExtras.TotalInterest;
+        _monthsSaved = withoutPaidExtras.NumberOfPayments - withPaidExtras.NumberOfPayments;
+
+        _remaining = LoanMath.RemainingSchedule(_loan, today, _extras, _whatIfExtra);
+        _remainingNoExtra = LoanMath.RemainingSchedule(_loan, today, _extras, extraPrincipal: 0m);
+        _original = LoanMath.OriginalSchedule(withExtra, _extras);
+        _originalNoExtra = LoanMath.OriginalSchedule(withExtra, _extras, includeExtra: false);
+    }
+
+    private async Task SaveExtraAsync()
+    {
+        _loan!.ExtraPrincipal = _whatIfExtra;
+        await Ledger.SaveLoanAsync(_loan);
+        Snackbar.Add($"Extra principal set to {_whatIfExtra:C}/month" + (_bills.Count > 0 ? ". Remember to update the payment bill amount." : ""), Severity.Success);
+        await LoadAsync();
+    }
+
+    private async Task EditAsync()
+    {
+        var parameters = new DialogParameters<LoanDialog> { { d => d.Model, _loan!.Copy() } };
+        var dialog = await Dialogs.ShowAsync<LoanDialog>("Edit loan", parameters, new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true });
+        if (await dialog.Result is { Canceled: false })
+        {
+            Snackbar.Add("Loan saved", Severity.Success);
+            await LoadAsync();
+        }
+    }
+
+    private async Task RecordExtraPaymentAsync()
+    {
+        var parameters = new DialogParameters<ExtraLoanPaymentDialog>
+        {
+            { d => d.Loan, _loan! },
+            { d => d.DefaultAccountId, _bills.FirstOrDefault(b => b.LoanPaymentKind == LoanPaymentKind.MonthlyPayment)?.PayFromAccountId }
+        };
+        var dialog = await Dialogs.ShowAsync<ExtraLoanPaymentDialog>(null, parameters, new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true });
+        if (await dialog.Result is { Canceled: false })
+        {
+            Snackbar.Add("Extra payment recorded", Severity.Success);
+            await LoadAsync();
+        }
+    }
+
+    private async Task CreateBillAsync(LoanPaymentKind kind)
+    {
+        var today = Ledger.Today;
+        var monthly = _bills.FirstOrDefault(b => b.LoanPaymentKind == LoanPaymentKind.MonthlyPayment);
+        var bill = kind == LoanPaymentKind.MonthlyPayment
+            ? new Bill
+            {
+                Name = _loan!.Name,
+                Payee = _loan.Lender,
+                Category = "Debt",
+                LoanId = _loan.Id,
+                ExpectedAmount = MonthlyAmount,
+                // Start from the next payment so past due dates aren't flagged as overdue.
+                StartDate = Recurrence.Next(Frequency.Monthly, _loan.FirstPaymentDate, null, today) ?? _loan.FirstPaymentDate
+            }
+            : new Bill
+            {
+                Name = $"{_loan!.Name} extra payment",
+                Payee = _loan.Lender,
+                Category = "Debt",
+                LoanId = _loan.Id,
+                LoanPaymentKind = LoanPaymentKind.ExtraPrincipal,
+                PayFromAccountId = monthly?.PayFromAccountId,
+                StartDate = today
+            };
+
+        var parameters = new DialogParameters<BillDialog> { { d => d.Model, bill } };
+        var title = kind == LoanPaymentKind.MonthlyPayment ? "Monthly payment bill" : "Scheduled extra payment";
+        var dialog = await Dialogs.ShowAsync<BillDialog>(title, parameters, new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true });
+        if (await dialog.Result is { Canceled: false })
+        {
+            Snackbar.Add("Bill created", Severity.Success);
+            await LoadAsync();
+        }
+    }
+
+    private async Task EditBillAsync(Bill bill)
+    {
+        var parameters = new DialogParameters<BillDialog> { { d => d.Model, bill.Copy() } };
+        var dialog = await Dialogs.ShowAsync<BillDialog>("Edit bill", parameters, new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true });
+        if (await dialog.Result is { Canceled: false })
+        {
+            Snackbar.Add("Bill saved", Severity.Success);
+            await LoadAsync();
+        }
+    }
+}

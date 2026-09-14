@@ -1,0 +1,135 @@
+@page "/Account/Manage/Admin/Users"
+
+@using Ledgerly.Services.Settings
+
+@inject UserManager<ApplicationUser> UserManager
+@inject SignInManager<ApplicationUser> SignInManager
+@inject AdminService Admin
+@inject RegistrationPolicy Registration
+@inject IdentityRedirectManager RedirectManager
+@inject ILogger<Users> Logger
+
+<PageTitle>Users &amp; sign-ups · Ledgerly</PageTitle>
+
+<h2 class="acct-subtitle">Users &amp; sign-ups</h2>
+<StatusMessage Message="@message" />
+
+<h3 class="acct-section" style="margin-top:0">New sign-ups</h3>
+<p class="acct-lead">
+    @if (signUpsOpen)
+    {
+        <text><strong>On.</strong> Anyone who can reach Ledgerly can create an account. Turn this off once everyone who needs an account has one.</text>
+    }
+    else
+    {
+        <text><strong>Off.</strong> The "Create an account" page is closed. Turn sign-ups on for a moment when someone new needs an account.</text>
+    }
+</p>
+<form @formname="sign-ups" @onsubmit="ToggleSignUpsAsync" method="post">
+    <AntiforgeryToken />
+    <button type="submit" class="acct-btn @(signUpsOpen ? "acct-btn-outline" : "acct-btn-primary")">
+        @(signUpsOpen ? "Turn off new sign-ups" : "Turn on new sign-ups")
+    </button>
+</form>
+
+<h3 class="acct-section">Accounts</h3>
+<p class="acct-lead">Admins can change the email server, sign-ups and who is an admin. Everyone's bills, accounts and loans stay private, including from admins.</p>
+
+<form @formname="set-admin" @onsubmit="SetAdminAsync" method="post">
+    <AntiforgeryToken />
+    <table class="acct-table">
+        <thead>
+            <tr><th>Email</th><th>Status</th><th></th></tr>
+        </thead>
+        <tbody>
+            @foreach (var u in users)
+            {
+                <tr>
+                    <td>
+                        @u.Email
+                        @if (u.Id == currentUserId)
+                        {
+                            <span class="acct-muted"> (you)</span>
+                        }
+                    </td>
+                    <td>
+                        @if (u.IsAdmin) { <span class="acct-badge acct-badge-primary">Admin</span> }
+                        @if (u.TwoFactorEnabled) { <span class="acct-badge">2FA</span> }
+                        @if (u.IsLockedOut) { <span class="acct-badge acct-badge-danger">Locked</span> }
+                    </td>
+                    <td class="acct-cell-actions">
+                        @if (u.IsAdmin)
+                        {
+                            <button type="submit" name="Command" value="revoke:@u.Id" class="acct-btn acct-btn-outline acct-btn-small">Remove admin</button>
+                        }
+                        else
+                        {
+                            <button type="submit" name="Command" value="grant:@u.Id" class="acct-btn acct-btn-outline acct-btn-small">Make admin</button>
+                        }
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+</form>
+
+@code {
+    private string? message;
+    private string? currentUserId;
+    private bool signUpsOpen;
+    private List<UserSummary> users = [];
+
+    [CascadingParameter]
+    private HttpContext HttpContext { get; set; } = default!;
+
+    [SupplyParameterFromForm(FormName = "set-admin")]
+    private string? Command { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        currentUserId = UserManager.GetUserId(HttpContext.User);
+        signUpsOpen = await Registration.IsOpenSettingAsync();
+        users = await Admin.GetUsersAsync();
+    }
+
+    private async Task ToggleSignUpsAsync()
+    {
+        var open = !await Registration.IsOpenSettingAsync();
+        await Registration.SetOpenAsync(open);
+        Logger.LogInformation("New sign-ups turned {State} by an admin.", open ? "on" : "off");
+        RedirectManager.RedirectToCurrentPageWithStatus(open ? "New sign-ups are on." : "New sign-ups are off.", HttpContext);
+    }
+
+    private async Task SetAdminAsync()
+    {
+        var parts = Command?.Split(':', 2);
+        if (parts is not ["grant" or "revoke", var userId])
+            return;
+
+        var makeAdmin = parts[0] == "grant";
+        var target = users.FirstOrDefault(u => u.Id == userId);
+        var error = await Admin.SetAdminAsync(userId, makeAdmin);
+        if (error is not null)
+        {
+            message = $"Error: {error}";
+            return;
+        }
+
+        Logger.LogInformation("Admin role {Change} for user {UserId}.", makeAdmin ? "granted" : "removed", userId);
+
+        if (userId == currentUserId)
+        {
+            // Refresh this browser's sign-in so the removed role takes effect immediately.
+            if (await UserManager.FindByIdAsync(userId) is { } self)
+                await SignInManager.RefreshSignInAsync(self);
+            RedirectManager.RedirectToWithStatus("Account/Manage", "You're no longer an admin.", HttpContext);
+            return;
+        }
+
+        RedirectManager.RedirectToCurrentPageWithStatus(
+            makeAdmin
+                ? $"{target?.Email} is now an admin. They'll be asked to sign in again to get admin access."
+                : $"{target?.Email} is no longer an admin.",
+            HttpContext);
+    }
+}

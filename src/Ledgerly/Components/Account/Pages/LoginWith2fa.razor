@@ -1,0 +1,92 @@
+@page "/Account/LoginWith2fa"
+
+@inject SignInManager<ApplicationUser> SignInManager
+@inject UserManager<ApplicationUser> UserManager
+@inject IdentityRedirectManager RedirectManager
+@inject ILogger<LoginWith2fa> Logger
+
+<PageTitle>Two-factor authentication · Ledgerly</PageTitle>
+
+<div class="acct-card">
+    <h1 class="acct-title">Two-factor authentication</h1>
+    <p class="acct-lead">Enter the code from your authenticator app.</p>
+
+    <StatusMessage Message="@message" />
+    <EditForm Model="Input" FormName="login-with-2fa" OnValidSubmit="OnValidSubmitAsync" method="post">
+        <input type="hidden" name="ReturnUrl" value="@ReturnUrl" />
+        <input type="hidden" name="RememberMe" value="@RememberMe" />
+        <DataAnnotationsValidator />
+        <div class="acct-field">
+            <label for="Input.TwoFactorCode">Authenticator code</label>
+            <InputText @bind-Value="Input.TwoFactorCode" id="Input.TwoFactorCode" class="acct-input" autocomplete="one-time-code" inputmode="numeric" />
+            <ValidationMessage For="() => Input.TwoFactorCode" />
+        </div>
+        <label class="acct-check">
+            <InputCheckbox @bind-Value="Input.RememberMachine" />
+            Don't ask again on this computer
+        </label>
+        <button type="submit" class="acct-btn acct-btn-primary acct-btn-block">Sign in</button>
+    </EditForm>
+
+    <p class="acct-footer">
+        Lost your device? <a href="Account/LoginWithRecoveryCode?ReturnUrl=@ReturnUrl">Use a recovery code</a>
+    </p>
+</div>
+
+@code {
+    private string? message;
+    private ApplicationUser user = default!;
+
+    [SupplyParameterFromForm]
+    private InputModel Input { get; set; } = default!;
+
+    [SupplyParameterFromQuery]
+    private string? ReturnUrl { get; set; }
+
+    [SupplyParameterFromQuery]
+    private bool RememberMe { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        Input ??= new();
+
+        // Ensure the user has gone through the username & password screen first
+        user = await SignInManager.GetTwoFactorAuthenticationUserAsync() ??
+            throw new InvalidOperationException("Unable to load two-factor authentication user.");
+    }
+
+    private async Task OnValidSubmitAsync()
+    {
+        var authenticatorCode = Input.TwoFactorCode!.Replace(" ", string.Empty).Replace("-", string.Empty);
+        var result = await SignInManager.TwoFactorAuthenticatorSignInAsync(authenticatorCode, RememberMe, Input.RememberMachine);
+        var userId = await UserManager.GetUserIdAsync(user);
+
+        if (result.Succeeded)
+        {
+            Logger.LogInformation("User with ID '{UserId}' logged in with 2fa.", userId);
+            RedirectManager.RedirectTo(ReturnUrl);
+        }
+        else if (result.IsLockedOut)
+        {
+            Logger.LogWarning("User with ID '{UserId}' account locked out.", userId);
+            RedirectManager.RedirectTo("Account/Lockout");
+        }
+        else
+        {
+            Logger.LogWarning("Invalid authenticator code entered for user with ID '{UserId}'.", userId);
+            message = "Error: That code isn't valid. Codes change every 30 seconds.";
+        }
+    }
+
+    private sealed class InputModel
+    {
+        [Required]
+        [StringLength(7, ErrorMessage = "The {0} must be at least {2} and at max {1} characters long.", MinimumLength = 6)]
+        [DataType(DataType.Text)]
+        [Display(Name = "Authenticator code")]
+        public string? TwoFactorCode { get; set; }
+
+        [Display(Name = "Remember this machine")]
+        public bool RememberMachine { get; set; }
+    }
+}

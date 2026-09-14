@@ -1,0 +1,19 @@
+@inject AppInfo App
+
+<MudNavMenu Class="pt-2">
+    <MudNavLink Href="" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.Dashboard">Dashboard</MudNavLink>
+    <MudNavLink Href="projection" Icon="@Icons.Material.Filled.ShowChart">Running Balance</MudNavLink>
+
+    <MudText Typo="Typo.overline" Class="px-4 pt-4 d-block">Money</MudText>
+    <MudNavLink Href="accounts" Icon="@Icons.Material.Filled.AccountBalance">Accounts</MudNavLink>
+    <MudNavLink Href="bills" Icon="@Icons.Material.Filled.ReceiptLong">Bills</MudNavLink>
+    <MudNavLink Href="income" Icon="@Icons.Material.Filled.Payments">Income</MudNavLink>
+
+    <MudText Typo="Typo.overline" Class="px-4 pt-4 d-block">Debt</MudText>
+    <MudNavLink Href="loans" Icon="@Icons.Material.Filled.RealEstateAgent">Loans</MudNavLink>
+    <MudNavLink Href="calculator" Icon="@Icons.Material.Filled.Calculate">Amortization Calculator</MudNavLink>
+</MudNavMenu>
+
+<MudText Typo="Typo.caption" Class="px-4 pt-6 pb-4 d-block mud-text-secondary">
+    Ledgerly @App.Version@(App.IsProduction ? "" : $" · {App.Channel}")
+</MudText>

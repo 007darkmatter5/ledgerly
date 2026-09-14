@@ -1,0 +1,186 @@
+@inject LedgerService Ledger
+
+<MudDialog>
+    <DialogContent>
+        <MudForm @ref="_form">
+            <MudGrid Spacing="2">
+                <MudItem xs="12" sm="6">
+                    <MudTextField @bind-Value="Model.Name" Label="Bill name" Required="true" RequiredError="Name is required" MaxLength="100" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                </MudItem>
+                <MudItem xs="12" sm="3">
+                    <MudTextField @bind-Value="Model.Payee" Label="Payee" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                </MudItem>
+                <MudItem xs="12" sm="3">
+                    <MudAutocomplete T="string" @bind-Value="Model.Category" Label="Category" SearchFunc="SearchCategories" CoerceValue="true" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                </MudItem>
+
+                <MudItem xs="12" sm="4">
+                    <MudNumericField @bind-Value="Model.ExpectedAmount" Label="Expected amount" Format="N2" Min="0m" Adornment="Adornment.Start" AdornmentText="$" Variant="Variant.Outlined" Margin="Margin.Dense" Required="true" />
+                </MudItem>
+                <MudItem xs="12" sm="4">
+                    <MudNumericField @bind-Value="Model.MaxAmount" Label="Up to (optional)" Format="N2" Min="0m" Adornment="Adornment.Start" AdornmentText="$" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true"
+                                     HelperText="For bills that vary, like utilities" Validation="@(new Func<decimal?, string?>(ValidateMax))" />
+                </MudItem>
+                <MudItem xs="12" sm="4">
+                    <MudSelect @bind-Value="Model.Frequency" Label="Repeats" Variant="Variant.Outlined" Margin="Margin.Dense">
+                        @foreach (var frequency in Enum.GetValues<Frequency>())
+                        {
+                            <MudSelectItem Value="frequency">@Display.Of(frequency)</MudSelectItem>
+                        }
+                    </MudSelect>
+                </MudItem>
+
+                <MudItem xs="12" sm="6">
+                    <DateOnlyPicker @bind-Value="_startDate" Label="@(Model.Frequency == Frequency.Once ? "Due date" : "First due date")" Required="true"
+                                    HelperText="@(Model.Frequency == Frequency.Once ? null : "Later due dates repeat from this one")" />
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    @if (Model.Frequency != Frequency.Once)
+                    {
+                        <DateOnlyPicker @bind-Value="_endDate" Label="Last due date (optional)" Clearable="true" />
+                    }
+                </MudItem>
+
+                <MudItem xs="12" sm="6">
+                    <MudSelect T="int?" @bind-Value="Model.PayFromAccountId" Label="Paid from account" Variant="Variant.Outlined" Margin="Margin.Dense"
+                               ToStringFunc="@(id => _accounts.FirstOrDefault(a => a.Id == id)?.Name ?? "Not assigned")"
+                               HelperText="@(_accounts.Count == 0 ? "Add an account first to project balances" : null)">
+                        <MudSelectItem T="int?" Value="null">Not assigned</MudSelectItem>
+                        @foreach (var account in _accounts)
+                        {
+                            <MudSelectItem T="int?" Value="account.Id">@account.Name</MudSelectItem>
+                        }
+                    </MudSelect>
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <MudSelect T="int?" Value="Model.LoanId" ValueChanged="OnLoanChanged" Label="Pays a loan (optional)" Variant="Variant.Outlined" Margin="Margin.Dense"
+                               ToStringFunc="@(id => _loans.FirstOrDefault(l => l.Id == id)?.Name ?? "None")">
+                        <MudSelectItem T="int?" Value="null">None</MudSelectItem>
+                        @foreach (var loan in _loans)
+                        {
+                            <MudSelectItem T="int?" Value="loan.Id">@loan.Name</MudSelectItem>
+                        }
+                    </MudSelect>
+                </MudItem>
+
+                @if (Model.LoanId is not null)
+                {
+                    <MudItem xs="12">
+                        <MudRadioGroup T="LoanPaymentKind" Value="Model.LoanPaymentKind" ValueChanged="OnKindChanged">
+                            <MudRadio T="LoanPaymentKind" Value="LoanPaymentKind.MonthlyPayment" Color="Color.Primary">The monthly loan payment</MudRadio>
+                            <MudRadio T="LoanPaymentKind" Value="LoanPaymentKind.ExtraPrincipal" Color="Color.Primary">An extra payment toward principal</MudRadio>
+                        </MudRadioGroup>
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                            @(Model.LoanPaymentKind == LoanPaymentKind.ExtraPrincipal
+                                ? "The whole amount lowers the loan balance when it's paid (or on its due date with autopay)."
+                                : "Paying more than this bill's amount counts the difference as extra toward principal. You can change the type when marking a payment paid.")
+                        </MudText>
+                    </MudItem>
+                }
+
+                <MudItem xs="12" sm="6">
+                    <MudSwitch @bind-Value="Model.AutoPay" Label="Autopay" Color="Color.Primary" />
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <MudSwitch @bind-Value="Model.IsActive" Label="Active" Color="Color.Primary" />
+                </MudItem>
+                <MudItem xs="12">
+                    <MudTextField @bind-Value="Model.Notes" Label="Notes" Lines="2" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                </MudItem>
+            </MudGrid>
+        </MudForm>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => MudDialog.Cancel()">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveAsync">Save</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = null!;
+    [Parameter] public Bill Model { get; set; } = new();
+    [Parameter] public IReadOnlyCollection<string> Categories { get; set; } = [];
+
+    private MudForm _form = null!;
+    private List<Account> _accounts = [];
+    private List<Loan> _loans = [];
+    private DateOnly? _startDate;
+    private DateOnly? _endDate;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _startDate = Model.Id == 0 ? null : Model.StartDate;
+        _endDate = Model.EndDate;
+        _accounts = await Ledger.GetAccountsAsync(activeOnly: true);
+        _loans = (await Ledger.GetLoansAsync()).Where(l => l.IsActive || l.Id == Model.LoanId).ToList();
+
+        if (Model.Id == 0 && Model.PayFromAccountId is null && _accounts.FirstOrDefault(a => a.Type == AccountType.Checking) is { } checking)
+            Model.PayFromAccountId = checking.Id;
+    }
+
+    private Task<IEnumerable<string>> SearchCategories(string? text, CancellationToken _) =>
+        Task.FromResult(Categories.Where(c => string.IsNullOrWhiteSpace(text) || c.Contains(text, StringComparison.OrdinalIgnoreCase)));
+
+    private string? ValidateMax(decimal? max) =>
+        max is { } m && m < Model.ExpectedAmount ? "Must be at least the expected amount" : null;
+
+    private void OnLoanChanged(int? loanId)
+    {
+        Model.LoanId = loanId;
+        if (_loans.FirstOrDefault(l => l.Id == loanId) is not { } loan)
+            return;
+
+        // Prefill from the loan when the bill is still blank.
+        Model.Payee ??= loan.Lender;
+        if (Model.LoanPaymentKind == LoanPaymentKind.ExtraPrincipal)
+        {
+            if (string.IsNullOrWhiteSpace(Model.Name))
+                Model.Name = $"{loan.Name} extra payment";
+            _startDate ??= Ledger.Today;
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(Model.Name))
+            Model.Name = loan.Name;
+        if (Model.ExpectedAmount == 0)
+            Model.ExpectedAmount = LoanMath.Payment(loan) + loan.ExtraPrincipal;
+        _startDate ??= loan.FirstPaymentDate;
+    }
+
+    private void OnKindChanged(LoanPaymentKind kind)
+    {
+        var previous = Model.LoanPaymentKind;
+        Model.LoanPaymentKind = kind;
+        if (_loans.FirstOrDefault(l => l.Id == Model.LoanId) is not { } loan || previous == kind)
+            return;
+
+        // Swap the prefilled name and amount if they still match what the other type suggested.
+        var monthlyAmount = LoanMath.Payment(loan) + loan.ExtraPrincipal;
+        if (kind == LoanPaymentKind.ExtraPrincipal)
+        {
+            if (Model.Name == loan.Name)
+                Model.Name = $"{loan.Name} extra payment";
+            if (Model.ExpectedAmount == monthlyAmount)
+                Model.ExpectedAmount = 0;
+        }
+        else
+        {
+            if (Model.Name == $"{loan.Name} extra payment")
+                Model.Name = loan.Name;
+            if (Model.ExpectedAmount == 0)
+                Model.ExpectedAmount = monthlyAmount;
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        await _form.ValidateAsync();
+        if (!_form.IsValid || _startDate is null)
+            return;
+
+        Model.StartDate = _startDate.Value;
+        Model.EndDate = Model.Frequency == Frequency.Once ? null : _endDate;
+        await Ledger.SaveBillAsync(Model);
+        MudDialog.Close(DialogResult.Ok(Model.Id));
+    }
+}

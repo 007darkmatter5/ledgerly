@@ -1,0 +1,32 @@
+@inherits LayoutComponentBase
+@layout AccountLayout
+@using Ledgerly.Services
+
+<div class="acct-manage">
+    <a href="" class="acct-back">← Back to Ledgerly</a>
+    <h1 class="acct-title">Account settings</h1>
+    <div class="acct-manage-grid">
+        <nav class="acct-nav">
+            <NavLink href="Account/Manage" Match="NavLinkMatch.All">Profile</NavLink>
+            <NavLink href="Account/Manage/ChangePassword">Password</NavLink>
+            <NavLink href="Account/Manage/TwoFactorAuthentication">Two-factor authentication</NavLink>
+            <NavLink href="Account/Manage/DeletePersonalData">Delete account</NavLink>
+            @if (IsAdmin)
+            {
+                <span class="acct-nav-heading">Administration</span>
+                <NavLink href="Account/Manage/Admin/Email">Email server</NavLink>
+                <NavLink href="Account/Manage/Admin/Users">Users &amp; sign-ups</NavLink>
+            }
+        </nav>
+        <section class="acct-panel">
+            @Body
+        </section>
+    </div>
+</div>
+
+@code {
+    [CascadingParameter]
+    private HttpContext HttpContext { get; set; } = default!;
+
+    private bool IsAdmin => HttpContext.User.IsInRole(AdminService.AdminRole);
+}

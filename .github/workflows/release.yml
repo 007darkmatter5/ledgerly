@@ -1,0 +1,108 @@
+name: Release
+
+# beta branch -> Beta channel:       image tags "beta" and "<version>-beta", GitHub pre-release
+# main branch -> Production channel: image tags "production", "latest" and "<version>", GitHub release
+# Versions are <major.minor from VERSION>.<run number>, so every release is unique and increasing.
+on:
+  push:
+    branches: [main, beta]
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  packages: write
+
+env:
+  IMAGE: ghcr.io/${{ github.repository_owner }}/ledgerly
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+
+      - run: dotnet restore
+      - run: dotnet build --no-restore -c Release
+      - run: dotnet test --no-build -c Release
+
+  publish:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Work out version and channel
+        id: meta
+        run: |
+          base=$(tr -d '[:space:]' < VERSION)
+          if [ "$GITHUB_REF_NAME" = "main" ]; then
+            version="$base.$GITHUB_RUN_NUMBER"
+            echo "channel=Production" >> "$GITHUB_OUTPUT"
+            echo "tags=$IMAGE:$version,$IMAGE:production,$IMAGE:latest" >> "$GITHUB_OUTPUT"
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          else
+            version="$base.$GITHUB_RUN_NUMBER-beta"
+            echo "channel=Beta" >> "$GITHUB_OUTPUT"
+            echo "tags=$IMAGE:$version,$IMAGE:beta" >> "$GITHUB_OUTPUT"
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Releasing $version to the $GITHUB_REF_NAME channel"
+
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          build-args: |
+            VERSION=${{ steps.meta.outputs.version }}
+            CHANNEL=${{ steps.meta.outputs.channel }}
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha,scope=${{ github.ref_name }}
+          cache-to: type=gha,mode=max,scope=${{ github.ref_name }}
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.meta.outputs.version }}
+          CHANNEL: ${{ steps.meta.outputs.channel }}
+          PRERELEASE: ${{ steps.meta.outputs.prerelease }}
+        run: |
+          channel_arg=$(echo "$CHANNEL" | tr '[:upper:]' '[:lower:]')
+          cat > notes.md <<EOF
+          **Channel:** $CHANNEL · **Image:** \`$IMAGE:$VERSION\`
+
+          Install or update on your server:
+
+          \`\`\`bash
+          curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/deploy/install.sh | sudo bash -s -- $channel_arg
+          \`\`\`
+          EOF
+
+          flags="--latest"
+          if [ "$PRERELEASE" = "true" ]; then flags="--prerelease --latest=false"; fi
+
+          gh release create "v$VERSION" \
+            --target "$GITHUB_SHA" \
+            --title "Ledgerly $VERSION ($CHANNEL)" \
+            --notes-file notes.md \
+            --generate-notes \
+            $flags

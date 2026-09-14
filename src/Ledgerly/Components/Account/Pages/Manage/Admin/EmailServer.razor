@@ -1,0 +1,284 @@
+@page "/Account/Manage/Admin/Email"
+
+@using Ledgerly.Services.Email
+
+@inject UserManager<ApplicationUser> UserManager
+@inject EmailSettingsStore Settings
+@inject IEmailService Email
+@inject IdentityRedirectManager RedirectManager
+@inject ILogger<EmailServer> Logger
+
+<PageTitle>Email server · Ledgerly</PageTitle>
+
+<h2 class="acct-subtitle">Email server</h2>
+<p class="acct-lead">
+    Ledgerly sends password reset links through this server. Until it's set up, "Forgot password?" is hidden.
+</p>
+<StatusMessage Message="@message" />
+
+@if (Settings.IsControlledByConfiguration)
+{
+    <div class="acct-alert acct-alert-warning" role="alert">
+        <strong>These settings come from Ledgerly's configuration</strong> (user secrets or environment variables), which
+        take priority over this page. To manage email here instead, remove the <code>Email</code> settings from configuration
+        (for example <code>dotnet user-secrets clear</code>) and restart Ledgerly.
+    </div>
+    <dl class="acct-summary">
+        <dt>Server</dt><dd>@effective.Options.Host:@effective.Options.Port</dd>
+        <dt>Sends from</dt><dd>@effective.Options.FromName &lt;@effective.Options.FromAddress&gt;</dd>
+    </dl>
+    <form @formname="test-configured" @onsubmit="TestConfiguredAsync" method="post" class="acct-form" style="margin-top:20px">
+        <AntiforgeryToken />
+        <button type="submit" class="acct-btn acct-btn-outline">Send test email to @adminEmail</button>
+    </form>
+}
+else
+{
+    if (saved?.PasswordUnreadable == true)
+    {
+        <div class="acct-alert acct-alert-danger" role="alert">
+            The saved password can't be decrypted (the encryption keys on this computer have changed). Enter the password again.
+        </div>
+    }
+
+    <EditForm Model="Input" FormName="email-server" OnValidSubmit="OnValidSubmitAsync" method="post" class="acct-form acct-form-wide">
+        <DataAnnotationsValidator />
+
+        <div class="acct-row">
+            <div class="acct-field acct-grow">
+                <label for="Input.Host">SMTP server</label>
+                <InputText @bind-Value="Input.Host" id="Input.Host" class="acct-input" placeholder="smtp.example.com" />
+                <ValidationMessage For="() => Input.Host" />
+            </div>
+            <div class="acct-field acct-narrow">
+                <label for="Input.Port">Port</label>
+                <InputNumber @bind-Value="Input.Port" id="Input.Port" class="acct-input" />
+                <ValidationMessage For="() => Input.Port" />
+            </div>
+        </div>
+
+        <div class="acct-field">
+            <label for="Input.Security">Encryption</label>
+            <InputSelect @bind-Value="Input.Security" id="Input.Security" class="acct-input">
+                <option value="@EmailSecurity.StartTls">STARTTLS (usually port 587)</option>
+                <option value="@EmailSecurity.SslOnConnect">SSL/TLS (usually port 465)</option>
+                <option value="@EmailSecurity.Auto">Automatic</option>
+                <option value="@EmailSecurity.None">None (local test servers only)</option>
+            </InputSelect>
+        </div>
+
+        <div class="acct-row">
+            <div class="acct-field acct-grow">
+                <label for="Input.Username">Username</label>
+                <InputText @bind-Value="Input.Username" id="Input.Username" class="acct-input" autocomplete="off" />
+                <small class="acct-help">Often your full email address. Leave blank if the server doesn't need a sign-in.</small>
+            </div>
+            <div class="acct-field acct-grow">
+                <label for="Input.Password">Password</label>
+                <InputText type="password" @bind-Value="Input.Password" id="Input.Password" class="acct-input" autocomplete="new-password"
+                           placeholder="@(saved?.HasPassword == true ? "•••••••• (saved)" : "")" />
+                <small class="acct-help">
+                    @(saved?.HasPassword == true ? "Leave blank to keep the saved password." : "For Gmail and many providers, use an app password.")
+                    Stored encrypted.
+                </small>
+            </div>
+        </div>
+        @if (saved?.HasPassword == true)
+        {
+            <label class="acct-check">
+                <InputCheckbox @bind-Value="Input.RemovePassword" />
+                Remove the saved password
+            </label>
+        }
+
+        <div class="acct-row">
+            <div class="acct-field acct-grow">
+                <label for="Input.FromAddress">From address</label>
+                <InputText @bind-Value="Input.FromAddress" id="Input.FromAddress" class="acct-input" placeholder="you@example.com" />
+                <small class="acct-help">Many providers require this to match the account you sign in with.</small>
+                <ValidationMessage For="() => Input.FromAddress" />
+            </div>
+            <div class="acct-field acct-grow">
+                <label for="Input.FromName">From name</label>
+                <InputText @bind-Value="Input.FromName" id="Input.FromName" class="acct-input" />
+            </div>
+        </div>
+
+        <div class="acct-field">
+            <label for="Input.PublicBaseUrl">Ledgerly's address (for links in emails)</label>
+            <InputText @bind-Value="Input.PublicBaseUrl" id="Input.PublicBaseUrl" class="acct-input" placeholder="@currentBaseUrl" />
+            <small class="acct-help">The address people type to open Ledgerly. Leave blank to use @currentBaseUrl.</small>
+            <ValidationMessage For="() => Input.PublicBaseUrl" />
+        </div>
+
+        <div class="acct-actions" style="margin-top:8px">
+            <button type="submit" name="Input.Action" value="@ActionSave" class="acct-btn acct-btn-primary">Send test email &amp; save</button>
+            <button type="submit" name="Input.Action" value="@ActionTest" class="acct-btn acct-btn-outline">Send test only</button>
+            @if (offerSaveWithoutTest)
+            {
+                <button type="submit" name="Input.Action" value="@ActionSaveUntested" class="acct-btn acct-btn-outline">Save without testing</button>
+            }
+        </div>
+        <small class="acct-help">Test emails go to @adminEmail.</small>
+    </EditForm>
+
+    @if (saved is not null)
+    {
+        <h3 class="acct-section">Turn off email</h3>
+        <form @formname="clear-email" @onsubmit="ClearAsync" method="post">
+            <AntiforgeryToken />
+            <p class="acct-lead">Removes these settings, including the saved password. "Forgot password?" will be hidden.</p>
+            <button type="submit" class="acct-btn acct-btn-danger">Remove email settings</button>
+        </form>
+    }
+}
+
+@code {
+    private const string ActionSave = "save";
+    private const string ActionTest = "test";
+    private const string ActionSaveUntested = "save-untested";
+
+    private string? message;
+    private string? adminEmail;
+    private string currentBaseUrl = "";
+    private bool offerSaveWithoutTest;
+    private SavedEmailSettings? saved;
+    private EffectiveEmailSettings effective = new(new EmailOptions(), EmailSettingsSource.None);
+
+    [CascadingParameter]
+    private HttpContext HttpContext { get; set; } = default!;
+
+    [SupplyParameterFromForm(FormName = "email-server")]
+    private InputModel Input { get; set; } = default!;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var user = await UserManager.GetUserAsync(HttpContext.User);
+        if (user is null)
+        {
+            RedirectManager.RedirectToInvalidUser(UserManager, HttpContext);
+            return;
+        }
+
+        adminEmail = await UserManager.GetEmailAsync(user);
+        currentBaseUrl = $"{HttpContext.Request.Scheme}://{HttpContext.Request.Host}";
+        saved = await Settings.GetSavedForDisplayAsync();
+        effective = await Settings.GetEffectiveAsync();
+
+        if (Input is null)
+        {
+            var o = saved?.Options ?? new EmailOptions { Security = EmailSecurity.StartTls };
+            Input = new InputModel
+            {
+                Host = o.Host, Port = o.Port, Security = o.Security, Username = o.Username,
+                FromAddress = o.FromAddress, FromName = o.FromName, PublicBaseUrl = o.PublicBaseUrl
+            };
+        }
+    }
+
+    private async Task OnValidSubmitAsync()
+    {
+        if (Settings.IsControlledByConfiguration || adminEmail is null)
+            return;
+
+        if (!string.IsNullOrWhiteSpace(Input.PublicBaseUrl)
+            && !(Uri.TryCreate(Input.PublicBaseUrl.Trim(), UriKind.Absolute, out var baseUrl) && (baseUrl.Scheme == Uri.UriSchemeHttp || baseUrl.Scheme == Uri.UriSchemeHttps)))
+        {
+            message = "Error: Ledgerly's address must be a full address starting with http:// or https://, like http://localhost:5005.";
+            return;
+        }
+
+        var options = new EmailOptions
+        {
+            Host = Input.Host?.Trim(), Port = Input.Port, Security = Input.Security, Username = Input.Username?.Trim(),
+            Password = await Settings.ResolvePasswordAsync(Input.Password, Input.RemovePassword),
+            FromAddress = Input.FromAddress?.Trim(), FromName = string.IsNullOrWhiteSpace(Input.FromName) ? "Ledgerly" : Input.FromName.Trim(),
+            PublicBaseUrl = Input.PublicBaseUrl?.Trim()
+        };
+
+        if (Input.Action != ActionSaveUntested)
+        {
+            try
+            {
+                await Email.SendWithSettingsAsync(options, adminEmail, "Ledgerly test email",
+                    EmailTemplates.Html("Email is working", "This test message from Ledgerly arrived, so password reset emails will too.", null, null,
+                        "You're receiving this because an admin tested Ledgerly's email settings."),
+                    "This test message from Ledgerly arrived, so password reset emails will too.");
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning(ex, "Test email with new settings failed.");
+                offerSaveWithoutTest = Input.Action == ActionSave;
+                message = $"Error: The test email couldn't be sent, so nothing was saved. {ex.Message}";
+                return;
+            }
+        }
+
+        if (Input.Action == ActionTest)
+        {
+            message = $"Test email sent to {adminEmail}. These settings aren't saved yet.";
+            return;
+        }
+
+        // Save with the typed password only; a blank one keeps the saved password.
+        options.Password = Input.Password;
+        await Settings.SaveAsync(options, Input.RemovePassword);
+        Logger.LogInformation("Email server settings saved by an admin.");
+
+        RedirectManager.RedirectToCurrentPageWithStatus(
+            Input.Action == ActionSaveUntested
+                ? "Settings saved without testing."
+                : $"Test email sent to {adminEmail} and settings saved. Password reset by email is now on.",
+            HttpContext);
+    }
+
+    private async Task TestConfiguredAsync()
+    {
+        if (adminEmail is null)
+            return;
+        try
+        {
+            await Email.SendAsync(adminEmail, "Ledgerly test email",
+                EmailTemplates.Html("Email is working", "This test message from Ledgerly arrived, so password reset emails will too.", null, null,
+                    "You're receiving this because an admin tested Ledgerly's email settings."),
+                "This test message from Ledgerly arrived, so password reset emails will too.");
+            message = $"Test email sent to {adminEmail}.";
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Test email failed.");
+            message = $"Error: The test email couldn't be sent. {ex.Message}";
+        }
+    }
+
+    private async Task ClearAsync()
+    {
+        await Settings.ClearAsync();
+        Logger.LogInformation("Email server settings removed by an admin.");
+        RedirectManager.RedirectToCurrentPageWithStatus("Email settings removed.", HttpContext);
+    }
+
+    private sealed class InputModel
+    {
+        [Required(ErrorMessage = "Enter the SMTP server address.")]
+        public string? Host { get; set; }
+
+        [Range(1, 65535, ErrorMessage = "Enter a port between 1 and 65535.")]
+        public int Port { get; set; } = 587;
+
+        public EmailSecurity Security { get; set; } = EmailSecurity.StartTls;
+        public string? Username { get; set; }
+        public string? Password { get; set; }
+        public bool RemovePassword { get; set; }
+
+        [Required(ErrorMessage = "Enter the address emails are sent from.")]
+        [EmailAddress(ErrorMessage = "Enter a valid email address.")]
+        public string? FromAddress { get; set; }
+
+        public string? FromName { get; set; } = "Ledgerly";
+
+        public string? PublicBaseUrl { get; set; }
+
+        public string? Action { get; set; }
+    }
+}

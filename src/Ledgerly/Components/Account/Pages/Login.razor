@@ -1,0 +1,121 @@
+@page "/Account/Login"
+
+@using Microsoft.AspNetCore.Authentication
+@using Ledgerly.Services.Email
+@using Ledgerly.Services.Settings
+
+@inject SignInManager<ApplicationUser> SignInManager
+@inject IEmailService Email
+@inject RegistrationPolicy Registration
+@inject ILogger<Login> Logger
+@inject NavigationManager NavigationManager
+@inject IdentityRedirectManager RedirectManager
+
+<PageTitle>Sign in · Ledgerly</PageTitle>
+
+<div class="acct-card">
+    <h1 class="acct-title">Sign in</h1>
+    <p class="acct-lead">Welcome back. Sign in to see your bills, balances and loans.</p>
+
+    <StatusMessage Message="@errorMessage" />
+    <EditForm Model="Input" method="post" OnValidSubmit="LoginUser" FormName="login">
+        <DataAnnotationsValidator />
+        <div class="acct-field">
+            <label for="Input.Email">Email</label>
+            <InputText @bind-Value="Input.Email" id="Input.Email" class="acct-input" autocomplete="username" aria-required="true" />
+            <ValidationMessage For="() => Input.Email" />
+        </div>
+        <div class="acct-field">
+            <label for="Input.Password">Password</label>
+            <InputText type="password" @bind-Value="Input.Password" id="Input.Password" class="acct-input" autocomplete="current-password" aria-required="true" />
+            <ValidationMessage For="() => Input.Password" />
+        </div>
+        <div class="acct-check-row">
+            <label class="acct-check">
+                <InputCheckbox @bind-Value="Input.RememberMe" />
+                Keep me signed in
+            </label>
+            @if (emailConfigured)
+            {
+                <a href="Account/ForgotPassword">Forgot password?</a>
+            }
+        </div>
+        <button type="submit" class="acct-btn acct-btn-primary acct-btn-block">Sign in</button>
+    </EditForm>
+
+    @if (signUpsOpen)
+    {
+        <p class="acct-footer">
+            New to Ledgerly?
+            <a href="@(NavigationManager.GetUriWithQueryParameters("Account/Register", new Dictionary<string, object?> { ["ReturnUrl"] = ReturnUrl }))">Create an account</a>
+        </p>
+    }
+</div>
+
+@code {
+    private string? errorMessage;
+    private bool emailConfigured;
+    private bool signUpsOpen;
+
+    [CascadingParameter]
+    private HttpContext HttpContext { get; set; } = default!;
+
+    [SupplyParameterFromForm]
+    private InputModel Input { get; set; } = default!;
+
+    [SupplyParameterFromQuery]
+    private string? ReturnUrl { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        Input ??= new();
+        emailConfigured = await Email.IsConfiguredAsync();
+        signUpsOpen = await Registration.IsOpenAsync();
+
+        if (HttpMethods.IsGet(HttpContext.Request.Method))
+        {
+            // Clear the existing external cookie to ensure a clean login process
+            await HttpContext.SignOutAsync(IdentityConstants.ExternalScheme);
+        }
+    }
+
+    public async Task LoginUser()
+    {
+        // Failed attempts count toward lockout (5 attempts, then a 5 minute wait).
+        var result = await SignInManager.PasswordSignInAsync(Input.Email, Input.Password, Input.RememberMe, lockoutOnFailure: true);
+
+        if (result.Succeeded)
+        {
+            Logger.LogInformation("User logged in.");
+            RedirectManager.RedirectTo(ReturnUrl);
+        }
+        else if (result.RequiresTwoFactor)
+        {
+            RedirectManager.RedirectTo(
+                "Account/LoginWith2fa",
+                new() { ["returnUrl"] = ReturnUrl, ["rememberMe"] = Input.RememberMe });
+        }
+        else if (result.IsLockedOut)
+        {
+            Logger.LogWarning("User account locked out.");
+            RedirectManager.RedirectTo("Account/Lockout");
+        }
+        else
+        {
+            errorMessage = "Error: That email and password don't match an account.";
+        }
+    }
+
+    private sealed class InputModel
+    {
+        [Required]
+        [EmailAddress]
+        public string Email { get; set; } = "";
+
+        [Required]
+        [DataType(DataType.Password)]
+        public string Password { get; set; } = "";
+
+        public bool RememberMe { get; set; }
+    }
+}

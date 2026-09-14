@@ -1,0 +1,77 @@
+@page "/Account/LoginWithRecoveryCode"
+
+@inject SignInManager<ApplicationUser> SignInManager
+@inject UserManager<ApplicationUser> UserManager
+@inject IdentityRedirectManager RedirectManager
+@inject ILogger<LoginWithRecoveryCode> Logger
+
+<PageTitle>Recovery code · Ledgerly</PageTitle>
+
+<div class="acct-card">
+    <h1 class="acct-title">Use a recovery code</h1>
+    <p class="acct-lead">
+        Enter one of the recovery codes you saved when you set up two-factor authentication. Each code works once.
+    </p>
+
+    <StatusMessage Message="@message" />
+    <EditForm Model="Input" FormName="login-with-recovery-code" OnValidSubmit="OnValidSubmitAsync" method="post">
+        <DataAnnotationsValidator />
+        <div class="acct-field">
+            <label for="Input.RecoveryCode">Recovery code</label>
+            <InputText @bind-Value="Input.RecoveryCode" id="Input.RecoveryCode" class="acct-input" autocomplete="off" />
+            <ValidationMessage For="() => Input.RecoveryCode" />
+        </div>
+        <button type="submit" class="acct-btn acct-btn-primary acct-btn-block">Sign in</button>
+    </EditForm>
+</div>
+
+@code {
+    private string? message;
+    private ApplicationUser user = default!;
+
+    [SupplyParameterFromForm]
+    private InputModel Input { get; set; } = default!;
+
+    [SupplyParameterFromQuery]
+    private string? ReturnUrl { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        Input ??= new();
+
+        // Ensure the user has gone through the username & password screen first
+        user = await SignInManager.GetTwoFactorAuthenticationUserAsync() ??
+            throw new InvalidOperationException("Unable to load two-factor authentication user.");
+    }
+
+    private async Task OnValidSubmitAsync()
+    {
+        var recoveryCode = Input.RecoveryCode.Replace(" ", string.Empty);
+        var result = await SignInManager.TwoFactorRecoveryCodeSignInAsync(recoveryCode);
+        var userId = await UserManager.GetUserIdAsync(user);
+
+        if (result.Succeeded)
+        {
+            Logger.LogInformation("User with ID '{UserId}' logged in with a recovery code.", userId);
+            RedirectManager.RedirectTo(ReturnUrl);
+        }
+        else if (result.IsLockedOut)
+        {
+            Logger.LogWarning("User account locked out.");
+            RedirectManager.RedirectTo("Account/Lockout");
+        }
+        else
+        {
+            Logger.LogWarning("Invalid recovery code entered for user with ID '{UserId}' ", userId);
+            message = "Error: That recovery code isn't valid.";
+        }
+    }
+
+    private sealed class InputModel
+    {
+        [Required]
+        [DataType(DataType.Text)]
+        [Display(Name = "Recovery code")]
+        public string RecoveryCode { get; set; } = "";
+    }
+}

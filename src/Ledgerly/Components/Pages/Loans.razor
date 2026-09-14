@@ -1,0 +1,151 @@
+@page "/loans"
+@inject LedgerService Ledger
+@inject IDialogService Dialogs
+@inject ISnackbar Snackbar
+@inject NavigationManager Navigation
+
+<PageTitle>Loans · Ledgerly</PageTitle>
+
+<MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-4" Wrap="Wrap.Wrap">
+    <MudStack Spacing="0">
+        <MudText Typo="Typo.h4">Loans</MudText>
+        <MudText Typo="Typo.body2" Class="mud-text-secondary">Balances, payoff dates, and full amortization tables.</MudText>
+    </MudStack>
+    <MudSpacer />
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="() => EditAsync(null)">Add loan</MudButton>
+</MudStack>
+
+@if (!_loading && _loans.Count > 0)
+{
+    <MudGrid Spacing="3" Class="mb-1">
+        <MudItem xs="12" sm="4">
+            <StatCard Label="Total owed" Icon="@Icons.Material.Filled.RealEstateAgent">
+                <Value>@_loans.Where(l => l.IsActive).Sum(l => LoanMath.CurrentBalance(l, Ledger.Today, ExtrasFor(l))).ToString("C")</Value>
+            </StatCard>
+        </MudItem>
+        <MudItem xs="12" sm="4">
+            <StatCard Label="Monthly payments" Icon="@Icons.Material.Filled.Payments">
+                <Value>@_loans.Where(l => l.IsActive).Sum(l => LoanMath.Payment(l) + l.ExtraPrincipal).ToString("C")</Value>
+            </StatCard>
+        </MudItem>
+        <MudItem xs="12" sm="4">
+            <StatCard Label="Interest left to pay" Icon="@Icons.Material.Filled.Percent">
+                <Value>@_loans.Where(l => l.IsActive).Sum(l => LoanMath.RemainingSchedule(l, Ledger.Today, ExtrasFor(l)).TotalInterest).ToString("C")</Value>
+                <Caption>if paid as scheduled</Caption>
+            </StatCard>
+        </MudItem>
+    </MudGrid>
+}
+
+<MudPaper Elevation="1">
+    <MudTable Items="_loans" Hover="true" Loading="_loading" Breakpoint="Breakpoint.Sm" Elevation="0"
+              OnRowClick="@((TableRowClickEventArgs<Loan> e) => Navigation.NavigateTo($"loans/{e.Item!.Id}"))" RowStyle="cursor:pointer">
+        <HeaderContent>
+            <MudTh>Loan</MudTh>
+            <MudTh Style="text-align:right">Balance</MudTh>
+            <MudTh Style="min-width:140px">Paid off</MudTh>
+            <MudTh Style="text-align:right">Rate</MudTh>
+            <MudTh Style="text-align:right">Payment</MudTh>
+            <MudTh>Payoff</MudTh>
+            <MudTh></MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            @{
+                var balance = LoanMath.CurrentBalance(context, Ledger.Today, ExtrasFor(context));
+                var remaining = LoanMath.RemainingSchedule(context, Ledger.Today, ExtrasFor(context));
+                var paid = context.OriginalPrincipal > 0 ? (double)((context.OriginalPrincipal - balance) / context.OriginalPrincipal * 100m) : 0;
+            }
+            <MudTd DataLabel="Loan">
+                <MudText Class="@(context.IsActive ? null : "mud-text-disabled")">@context.Name</MudText>
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">@Display.Of(context.Type)@(string.IsNullOrWhiteSpace(context.Lender) ? "" : $" · {context.Lender}")@(context.IsActive ? "" : " · Inactive")</MudText>
+            </MudTd>
+            <MudTd DataLabel="Balance" Style="text-align:right">
+                <MudText Typo="Typo.body2">@balance.ToString("C")</MudText>
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">@(context.CurrentBalance is null ? "estimated" : $"as of {context.BalanceAsOf:M/d/yy}")</MudText>
+            </MudTd>
+            <MudTd DataLabel="Paid off">
+                <MudProgressLinear Value="Math.Clamp(paid, 0, 100)" Color="Color.Primary" Rounded="true" />
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">@paid.ToString("0")% of @context.OriginalPrincipal.ToString("C0")</MudText>
+            </MudTd>
+            <MudTd DataLabel="Rate" Style="text-align:right">@context.AnnualRatePercent.ToString("0.###")%</MudTd>
+            <MudTd DataLabel="Payment" Style="text-align:right">
+                @LoanMath.Payment(context).ToString("C")
+                @if (context.ExtraPrincipal > 0)
+                {
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">+ @context.ExtraPrincipal.ToString("C") extra</MudText>
+                }
+            </MudTd>
+            <MudTd DataLabel="Payoff">
+                @if (remaining.PayoffDate is { } payoff)
+                {
+                    <MudText Typo="Typo.body2">@payoff.ToString("MMM yyyy")</MudText>
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary">@Display.Months(remaining.NumberOfPayments) left</MudText>
+                }
+                else if (remaining.NeverPaysOff)
+                {
+                    <MudText Typo="Typo.body2" Color="Color.Error">Payment too low</MudText>
+                }
+                else
+                {
+                    <MudText Typo="Typo.body2" Color="Color.Success">Paid off</MudText>
+                }
+            </MudTd>
+            <MudTd Style="text-align:right; white-space:nowrap">
+                <span @onclick:stopPropagation="true">
+                    <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="() => EditAsync(context)" aria-label="Edit" />
+                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="() => DeleteAsync(context)" aria-label="Delete" />
+                </span>
+            </MudTd>
+        </RowTemplate>
+        <NoRecordsContent>
+            <MudText Class="py-6 mud-text-secondary">No loans yet. Add a mortgage, car loan or student loan to track its balance and see its amortization table.</MudText>
+        </NoRecordsContent>
+    </MudTable>
+</MudPaper>
+
+@code {
+    private bool _loading = true;
+    private List<Loan> _loans = [];
+    private Dictionary<int, List<ExtraPayment>> _loanExtras = [];
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loans = await Ledger.GetLoansAsync();
+        var bills = await Ledger.GetBillsAsync();
+        _loanExtras = _loans.ToDictionary(l => l.Id, l => LoanPayments.ExtrasFor(l, bills, Ledger.Today));
+        _loading = false;
+    }
+
+    private List<ExtraPayment> ExtrasFor(Loan loan) => _loanExtras.GetValueOrDefault(loan.Id) ?? [];
+
+    private async Task EditAsync(Loan? loan)
+    {
+        var parameters = new DialogParameters<LoanDialog> { { d => d.Model, loan?.Copy() ?? new Loan() } };
+        var dialog = await Dialogs.ShowAsync<LoanDialog>(loan is null ? "Add loan" : "Edit loan", parameters,
+            new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true });
+        if (await dialog.Result is { Canceled: false, Data: int id })
+        {
+            if (loan is null)
+            {
+                Navigation.NavigateTo($"loans/{id}");
+                return;
+            }
+            Snackbar.Add("Loan saved", Severity.Success);
+            await LoadAsync();
+        }
+    }
+
+    private async Task DeleteAsync(Loan loan)
+    {
+        var confirmed = await Dialogs.ShowMessageBoxAsync("Delete loan?",
+            $"Delete \"{loan.Name}\"? Bills that pay it are kept but unlinked.", yesText: "Delete", cancelText: "Cancel");
+        if (confirmed != true)
+            return;
+
+        await Ledger.DeleteLoanAsync(loan.Id);
+        Snackbar.Add("Loan deleted", Severity.Info);
+        await LoadAsync();
+    }
+}

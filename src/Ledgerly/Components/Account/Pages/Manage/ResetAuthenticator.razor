@@ -1,0 +1,50 @@
+@page "/Account/Manage/ResetAuthenticator"
+
+@inject UserManager<ApplicationUser> UserManager
+@inject SignInManager<ApplicationUser> SignInManager
+@inject IdentityRedirectManager RedirectManager
+@inject ILogger<ResetAuthenticator> Logger
+
+<PageTitle>Reset authenticator key · Ledgerly</PageTitle>
+
+<StatusMessage />
+<h2 class="acct-subtitle">Reset authenticator key</h2>
+<div class="acct-alert acct-alert-warning" role="alert">
+    <strong>Your current authenticator app will stop working.</strong>
+    Two-factor authentication is turned off until you set up your app again with the new key.
+</div>
+
+<form @formname="reset-authenticator" @onsubmit="OnSubmitAsync" method="post">
+    <AntiforgeryToken />
+    <div class="acct-actions">
+        <button class="acct-btn acct-btn-danger" type="submit">Reset key</button>
+        <a href="Account/Manage/TwoFactorAuthentication" class="acct-btn acct-btn-outline">Cancel</a>
+    </div>
+</form>
+
+@code {
+    [CascadingParameter]
+    private HttpContext HttpContext { get; set; } = default!;
+
+    private async Task OnSubmitAsync()
+    {
+        var user = await UserManager.GetUserAsync(HttpContext.User);
+        if (user is null)
+        {
+            RedirectManager.RedirectToInvalidUser(UserManager, HttpContext);
+            return;
+        }
+
+        await UserManager.SetTwoFactorEnabledAsync(user, false);
+        await UserManager.ResetAuthenticatorKeyAsync(user);
+        var userId = await UserManager.GetUserIdAsync(user);
+        Logger.LogInformation("User with ID '{UserId}' has reset their authentication app key.", userId);
+
+        await SignInManager.RefreshSignInAsync(user);
+
+        RedirectManager.RedirectToWithStatus(
+            "Account/Manage/EnableAuthenticator",
+            "Your authenticator key has been reset. Set up your app with the new key below.",
+            HttpContext);
+    }
+}

@@ -1,0 +1,252 @@
+@page "/"
+@inject LedgerService Ledger
+@inject NavigationManager Navigation
+
+<PageTitle>Dashboard · Ledgerly</PageTitle>
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+}
+else if (!_hasData)
+{
+    <MudPaper Class="pa-8 mx-auto" MaxWidth="720px" Elevation="1">
+        <MudStack Spacing="3">
+            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                <MudIcon Icon="@Icons.Material.Filled.AccountBalanceWallet" Color="Color.Primary" Size="Size.Large" />
+                <MudText Typo="Typo.h4">Welcome to Ledgerly</MudText>
+            </MudStack>
+            <MudText>Track bills and where they're paid from, see where your account balances are headed, and keep an eye on your loans.</MudText>
+            <MudText Typo="Typo.subtitle1" Class="mt-2">Getting started</MudText>
+            <MudList T="string" Dense="true">
+                <MudListItem Icon="@Icons.Material.Filled.AccountBalance" Href="accounts">1. Add the accounts you pay bills from, with today's balance</MudListItem>
+                <MudListItem Icon="@Icons.Material.Filled.Payments" Href="income">2. Add your income, like paychecks</MudListItem>
+                <MudListItem Icon="@Icons.Material.Filled.ReceiptLong" Href="bills">3. Add your bills and choose the account each is paid from</MudListItem>
+                <MudListItem Icon="@Icons.Material.Filled.RealEstateAgent" Href="loans">4. Add loans to see balances and amortization</MudListItem>
+            </MudList>
+            <MudStack Row="true" Spacing="2" Wrap="Wrap.Wrap">
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" Href="accounts" StartIcon="@Icons.Material.Filled.Add">Add an account</MudButton>
+                @if (!_isSample)
+                {
+                    <MudButton Variant="Variant.Outlined" OnClick="ExploreSampleAsync" StartIcon="@Icons.Material.Filled.Science" Disabled="_loadingSample">Explore with sample data</MudButton>
+                }
+            </MudStack>
+            @if (!_isSample)
+            {
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                    Sample data opens in a separate sample ledger, so it never mixes with your own. Delete it or come back to your ledger any time from the account menu.
+                </MudText>
+            }
+        </MudStack>
+    </MudPaper>
+}
+else
+{
+    <MudText Typo="Typo.h4" Class="mb-1">Dashboard</MudText>
+    <MudText Typo="Typo.body2" Class="mud-text-secondary mb-4">@Ledger.Today.ToString("dddd, MMMM d, yyyy")</MudText>
+
+    <MudGrid Spacing="3">
+        <MudItem xs="12" sm="6" lg="3">
+            <StatCard Label="Account balances" Icon="@Icons.Material.Filled.AccountBalance">
+                <Value><Money Value="_accounts.Sum(a => a.Balance)" /></Value>
+                <Caption>@_accounts.Count active account@(_accounts.Count == 1 ? "" : "s")</Caption>
+            </StatCard>
+        </MudItem>
+        <MudItem xs="12" sm="6" lg="3">
+            <StatCard Label="Due in the next 30 days" Icon="@Icons.Material.Filled.ReceiptLong">
+                <Value><Money Value="_upcoming30.Where(d => !d.IsPaid).Sum(d => d.Amount)" Colored="false" /></Value>
+                <Caption>@_upcoming30.Count(d => !d.IsPaid) unpaid bill@(_upcoming30.Count(d => !d.IsPaid) == 1 ? "" : "s")</Caption>
+            </StatCard>
+        </MudItem>
+        <MudItem xs="12" sm="6" lg="3">
+            <StatCard Label="Overdue" Icon="@Icons.Material.Filled.Warning" IconColor="@(_overdue.Count > 0 ? Color.Error : Color.Default)">
+                <Value><Money Value="_overdue.Sum(d => d.Amount)" Colored="false" Class="@(_overdue.Count > 0 ? "mud-error-text" : null)" /></Value>
+                <Caption>@(_overdue.Count == 0 ? "You're all caught up" : $"{_overdue.Count} bill{(_overdue.Count == 1 ? "" : "s")} past due")</Caption>
+            </StatCard>
+        </MudItem>
+        <MudItem xs="12" sm="6" lg="3">
+            <StatCard Label="Loan balances" Icon="@Icons.Material.Filled.RealEstateAgent" Href="loans">
+                <Value><Money Value="_loans.Sum(l => LoanMath.CurrentBalance(l, Ledger.Today, ExtrasFor(l)))" Colored="false" /></Value>
+                <Caption>@_loans.Sum(l => LoanMath.Payment(l) + l.ExtraPrincipal).ToString("C") / month</Caption>
+            </StatCard>
+        </MudItem>
+
+        <MudItem xs="12">
+            <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-2">
+                <MudText Typo="Typo.h6">Accounts · next 30 days</MudText>
+                <MudSpacer />
+                <MudButton Href="projection" EndIcon="@Icons.Material.Filled.ArrowForward" Size="Size.Small">Running balance</MudButton>
+            </MudStack>
+            @if (_accounts.Count == 0)
+            {
+                <MudAlert Severity="Severity.Info">Add an account to see projected balances. <MudLink Href="accounts">Add account</MudLink></MudAlert>
+            }
+            <MudGrid Spacing="3">
+                @foreach (var (account, projection) in _projections)
+                {
+                    var low = projection.LowestPoint;
+                    var belowZero = projection.FirstBelowZero;
+                    var belowThreshold = projection.FirstBelowThreshold;
+                    var stale = Ledger.Today.DayNumber - account.BalanceAsOf.DayNumber > 14;
+                    <MudItem xs="12" sm="6" md="4">
+                        <MudCard Elevation="1" Style="height:100%">
+                            <MudCardHeader>
+                                <CardHeaderAvatar>
+                                    <MudAvatar Color="Color.Primary" Variant="Variant.Outlined"><MudIcon Icon="@Display.Icon(account.Type)" /></MudAvatar>
+                                </CardHeaderAvatar>
+                                <CardHeaderContent>
+                                    <MudText Typo="Typo.subtitle1">@account.Name</MudText>
+                                    <MudText Typo="Typo.caption" Class="@(stale ? "mud-warning-text" : "mud-text-secondary")">
+                                        Balance as of @Display.Date(account.BalanceAsOf)@(stale ? " · update it?" : "")
+                                    </MudText>
+                                </CardHeaderContent>
+                            </MudCardHeader>
+                            <MudCardContent Class="pt-0">
+                                <MudText Typo="Typo.h5"><Money Value="account.Balance" /></MudText>
+                                <MudStack Row="true" Justify="Justify.SpaceBetween" Class="mt-3">
+                                    <MudStack Spacing="0">
+                                        <MudText Typo="Typo.caption" Class="mud-text-secondary">Lowest</MudText>
+                                        <MudText Typo="Typo.body2">
+                                            @if (low is null)
+                                            {
+                                                <Money Value="account.Balance" />
+                                            }
+                                            else
+                                            {
+                                                <Money Value="low.RunningBalance" /> <span class="mud-text-secondary">on @low.Date.ToString("MMM d")</span>
+                                            }
+                                        </MudText>
+                                    </MudStack>
+                                    <MudStack Spacing="0" AlignItems="AlignItems.End">
+                                        <MudText Typo="Typo.caption" Class="mud-text-secondary">In 30 days</MudText>
+                                        <MudText Typo="Typo.body2"><Money Value="projection.EndingBalance" /></MudText>
+                                    </MudStack>
+                                </MudStack>
+                                @if (belowZero is not null)
+                                {
+                                    <MudAlert Severity="Severity.Error" Dense="true" Class="mt-3">Goes negative on @belowZero.Date.ToString("MMM d") (@belowZero.Description)</MudAlert>
+                                }
+                                else if (belowThreshold is not null)
+                                {
+                                    <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-3">Below @projection.LowBalanceThreshold?.ToString("C0") on @belowThreshold.Date.ToString("MMM d")</MudAlert>
+                                }
+                            </MudCardContent>
+                            <MudCardActions>
+                                <MudButton Href="@($"projection?accounts={account.Id}")" Size="Size.Small" Color="Color.Primary">View projection</MudButton>
+                            </MudCardActions>
+                        </MudCard>
+                    </MudItem>
+                }
+            </MudGrid>
+        </MudItem>
+
+        @if (_overdue.Count > 0)
+        {
+            <MudItem xs="12">
+                <MudPaper Elevation="1" Class="pa-4">
+                    <MudText Typo="Typo.h6" Color="Color.Error" Class="mb-2">Past due</MudText>
+                    <BillDueTable Items="_overdue" OnChanged="LoadAsync" />
+                </MudPaper>
+            </MudItem>
+        }
+
+        <MudItem xs="12" lg="8">
+            <MudPaper Elevation="1" Class="pa-4" Style="height:100%">
+                <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-2">
+                    <MudText Typo="Typo.h6">Coming up · next 14 days</MudText>
+                    <MudSpacer />
+                    <MudButton Href="bills" EndIcon="@Icons.Material.Filled.ArrowForward" Size="Size.Small">All bills</MudButton>
+                </MudStack>
+                @if (_unassignedBills > 0)
+                {
+                    <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-2">
+                        @_unassignedBills bill@(_unassignedBills == 1 ? " has" : "s have") no pay-from account and won't appear in balance projections.
+                    </MudAlert>
+                }
+                <BillDueTable Items="_upcoming30.Where(d => d.DueDate <= Ledger.Today.AddDays(14))" OnChanged="LoadAsync" EmptyText="No bills due in the next two weeks." />
+            </MudPaper>
+        </MudItem>
+
+        <MudItem xs="12" lg="4">
+            <MudPaper Elevation="1" Class="pa-4" Style="height:100%">
+                <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-2">
+                    <MudText Typo="Typo.h6">Loans</MudText>
+                    <MudSpacer />
+                    <MudButton Href="loans" EndIcon="@Icons.Material.Filled.ArrowForward" Size="Size.Small">All loans</MudButton>
+                </MudStack>
+                @if (_loans.Count == 0)
+                {
+                    <MudText Typo="Typo.body2" Class="mud-text-secondary">No loans yet.</MudText>
+                }
+                <MudStack Spacing="3">
+                    @foreach (var loan in _loans)
+                    {
+                        var balance = LoanMath.CurrentBalance(loan, Ledger.Today, ExtrasFor(loan));
+                        var paidPercent = loan.OriginalPrincipal > 0 ? (double)((loan.OriginalPrincipal - balance) / loan.OriginalPrincipal * 100m) : 0;
+                        <MudLink Href="@($"loans/{loan.Id}")" Underline="Underline.None" Color="Color.Inherit">
+                            <MudStack Row="true" Justify="Justify.SpaceBetween">
+                                <MudText Typo="Typo.body2">@loan.Name</MudText>
+                                <MudText Typo="Typo.body2">@balance.ToString("C")</MudText>
+                            </MudStack>
+                            <MudProgressLinear Value="Math.Clamp(paidPercent, 0, 100)" Color="Color.Primary" Rounded="true" Size="Size.Small" Class="my-1" />
+                            <MudText Typo="Typo.caption" Class="mud-text-secondary">@paidPercent.ToString("0")% paid · @loan.AnnualRatePercent.ToString("0.###")% APR</MudText>
+                        </MudLink>
+                    }
+                </MudStack>
+            </MudPaper>
+        </MudItem>
+    </MudGrid>
+}
+
+@code {
+    private bool _loading = true;
+    private bool _hasData;
+    private bool _loadingSample;
+    private bool _isSample;
+    private List<Account> _accounts = [];
+    private List<Loan> _loans = [];
+    private Dictionary<int, List<ExtraPayment>> _loanExtras = [];
+    private List<(Account Account, ProjectionResult Projection)> _projections = [];
+    private List<BillDue> _upcoming30 = [];
+    private List<BillDue> _overdue = [];
+    private int _unassignedBills;
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _isSample = (await Ledger.GetActiveLedgerAsync()).IsSample;
+        _hasData = await Ledger.HasAnyDataAsync();
+        if (!_hasData)
+        {
+            _loading = false;
+            return;
+        }
+
+        var today = Ledger.Today;
+        _accounts = await Ledger.GetAccountsAsync(activeOnly: true);
+        _loans = (await Ledger.GetLoansAsync()).Where(l => l.IsActive).ToList();
+        var bills = await Ledger.GetBillsAsync();
+        _loanExtras = _loans.ToDictionary(l => l.Id, l => LoanPayments.ExtrasFor(l, bills, today));
+        var incomes = await Ledger.GetIncomesAsync();
+
+        _projections = _accounts
+            .Select(a => (a, Projection.Build([a], bills, incomes, today.AddDays(30))))
+            .ToList();
+
+        _upcoming30 = BillSchedule.Between(bills, today, today.AddDays(30)).ToList();
+        _overdue = BillSchedule.Between(bills, today.AddDays(-90), today.AddDays(-1)).Where(d => d.IsOverdue(today)).ToList();
+        _unassignedBills = bills.Count(b => b.IsActive && b.PayFromAccountId is null);
+        _loading = false;
+    }
+
+    private List<ExtraPayment> ExtrasFor(Loan loan) => _loanExtras.GetValueOrDefault(loan.Id) ?? [];
+
+    private async Task ExploreSampleAsync()
+    {
+        _loadingSample = true;
+        await Ledger.StartSampleAsync();
+        // Reload so the layout picks up the switch to the sample ledger.
+        Navigation.NavigateTo("", forceLoad: true);
+    }
+}

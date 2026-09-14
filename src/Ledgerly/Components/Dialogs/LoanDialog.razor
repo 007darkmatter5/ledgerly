@@ -1,0 +1,100 @@
+@inject LedgerService Ledger
+
+<MudDialog>
+    <DialogContent>
+        <MudForm @ref="_form">
+            <MudGrid Spacing="2">
+                <MudItem xs="12" sm="5">
+                    <MudTextField @bind-Value="Model.Name" Label="Loan name" Required="true" RequiredError="Name is required" MaxLength="100" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                </MudItem>
+                <MudItem xs="12" sm="4">
+                    <MudTextField @bind-Value="Model.Lender" Label="Lender" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                </MudItem>
+                <MudItem xs="12" sm="3">
+                    <MudSelect @bind-Value="Model.Type" Label="Type" Variant="Variant.Outlined" Margin="Margin.Dense">
+                        @foreach (var type in Enum.GetValues<LoanType>())
+                        {
+                            <MudSelectItem Value="type">@Display.Of(type)</MudSelectItem>
+                        }
+                    </MudSelect>
+                </MudItem>
+
+                <MudItem xs="12"><MudText Typo="Typo.subtitle2">Original terms</MudText></MudItem>
+                <MudItem xs="12" sm="4">
+                    <MudNumericField @bind-Value="Model.OriginalPrincipal" Label="Amount borrowed" Format="N2" Min="0.01m" Adornment="Adornment.Start" AdornmentText="$" Variant="Variant.Outlined" Margin="Margin.Dense" Required="true" />
+                </MudItem>
+                <MudItem xs="12" sm="4">
+                    <MudNumericField @bind-Value="Model.AnnualRatePercent" Label="Interest rate (APR)" Format="0.###" Min="0m" Max="100m" Adornment="Adornment.End" AdornmentText="%" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                </MudItem>
+                <MudItem xs="12" sm="4">
+                    <MudNumericField @bind-Value="Model.TermMonths" Label="Term (months)" Min="1" Max="1200" Variant="Variant.Outlined" Margin="Margin.Dense" Required="true"
+                                     HelperText="@(Model.TermMonths > 0 ? Display.Months(Model.TermMonths) : null)" />
+                </MudItem>
+                <MudItem xs="12" sm="4">
+                    <DateOnlyPicker @bind-Value="_firstPayment" Label="First payment date" Required="true" />
+                </MudItem>
+                <MudItem xs="12" sm="4">
+                    <MudNumericField @bind-Value="Model.PaymentOverride" Label="Monthly payment (P&I)" Format="N2" Min="0m" Adornment="Adornment.Start" AdornmentText="$" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true"
+                                     HelperText="@($"Calculated: {CalculatedPayment:C}. Leave blank to use it.")" />
+                </MudItem>
+                <MudItem xs="12" sm="4">
+                    <MudNumericField @bind-Value="Model.ExtraPrincipal" Label="Extra principal / month" Format="N2" Min="0m" Adornment="Adornment.Start" AdornmentText="$" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                </MudItem>
+
+                <MudItem xs="12"><MudText Typo="Typo.subtitle2">Current balance (optional)</MudText></MudItem>
+                <MudItem xs="12" sm="6">
+                    <MudNumericField @bind-Value="Model.CurrentBalance" Label="Balance from lender" Format="N2" Min="0m" Adornment="Adornment.Start" AdornmentText="$" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true"
+                                     HelperText="Leave blank to estimate it from the schedule" />
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    @if (Model.CurrentBalance is not null)
+                    {
+                        <DateOnlyPicker @bind-Value="_balanceAsOf" Label="Balance as of" Required="true" />
+                    }
+                </MudItem>
+
+                <MudItem xs="12">
+                    <MudSwitch @bind-Value="Model.IsActive" Label="Active" Color="Color.Primary" />
+                </MudItem>
+                <MudItem xs="12">
+                    <MudTextField @bind-Value="Model.Notes" Label="Notes" Lines="2" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                </MudItem>
+            </MudGrid>
+        </MudForm>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => MudDialog.Cancel()">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveAsync">Save</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = null!;
+    [Parameter] public Loan Model { get; set; } = new();
+
+    private MudForm _form = null!;
+    private DateOnly? _firstPayment;
+    private DateOnly? _balanceAsOf;
+
+    private decimal CalculatedPayment => Amortization.MonthlyPayment(Model.OriginalPrincipal, Model.AnnualRatePercent, Model.TermMonths);
+
+    protected override void OnInitialized()
+    {
+        if (Model.Id == 0 && Model.TermMonths == 0)
+            Model.TermMonths = 60;
+        _firstPayment = Model.Id == 0 ? null : Model.FirstPaymentDate;
+        _balanceAsOf = Model.BalanceAsOf ?? Ledger.Today;
+    }
+
+    private async Task SaveAsync()
+    {
+        await _form.ValidateAsync();
+        if (!_form.IsValid || _firstPayment is null)
+            return;
+
+        Model.FirstPaymentDate = _firstPayment.Value;
+        Model.BalanceAsOf = Model.CurrentBalance is null ? null : _balanceAsOf ?? Ledger.Today;
+        await Ledger.SaveLoanAsync(Model);
+        MudDialog.Close(DialogResult.Ok(Model.Id));
+    }
+}

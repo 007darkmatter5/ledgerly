@@ -1,0 +1,91 @@
+@page "/Account/Manage/TwoFactorAuthentication"
+
+@inject UserManager<ApplicationUser> UserManager
+@inject SignInManager<ApplicationUser> SignInManager
+@inject IdentityRedirectManager RedirectManager
+
+<PageTitle>Two-factor authentication · Ledgerly</PageTitle>
+
+<StatusMessage />
+<h2 class="acct-subtitle">Two-factor authentication</h2>
+<p class="acct-lead">
+    Two-factor authentication asks for a code from an authenticator app (like Microsoft Authenticator,
+    Google Authenticator or 1Password) when you sign in. It is currently <strong>@(is2faEnabled ? "on" : "off")</strong>.
+</p>
+
+@if (is2faEnabled)
+{
+    if (recoveryCodesLeft == 0)
+    {
+        <div class="acct-alert acct-alert-danger">
+            <strong>You have no recovery codes left.</strong>
+            <a href="Account/Manage/GenerateRecoveryCodes">Generate a new set</a> so you can still sign in if you lose your device.
+        </div>
+    }
+    else if (recoveryCodesLeft <= 3)
+    {
+        <div class="acct-alert acct-alert-warning">
+            <strong>You have @recoveryCodesLeft recovery code@(recoveryCodesLeft == 1 ? "" : "s") left.</strong>
+            You should <a href="Account/Manage/GenerateRecoveryCodes">generate a new set</a>.
+        </div>
+    }
+
+    <div class="acct-actions">
+        @if (isMachineRemembered)
+        {
+            <form @formname="forget-browser" @onsubmit="OnSubmitForgetBrowserAsync" method="post">
+                <AntiforgeryToken />
+                <button type="submit" class="acct-btn acct-btn-outline">Forget this browser</button>
+            </form>
+        }
+        <a href="Account/Manage/GenerateRecoveryCodes" class="acct-btn acct-btn-outline">Reset recovery codes</a>
+        <a href="Account/Manage/Disable2fa" class="acct-btn acct-btn-danger">Turn off</a>
+    </div>
+}
+
+<h3 class="acct-section">Authenticator app</h3>
+<div class="acct-actions">
+    @if (!hasAuthenticator)
+    {
+        <a href="Account/Manage/EnableAuthenticator" class="acct-btn acct-btn-primary">Add authenticator app</a>
+    }
+    else
+    {
+        <a href="Account/Manage/EnableAuthenticator" class="acct-btn acct-btn-primary">Set up authenticator app</a>
+        <a href="Account/Manage/ResetAuthenticator" class="acct-btn acct-btn-outline">Reset authenticator key</a>
+    }
+</div>
+
+@code {
+    private bool hasAuthenticator;
+    private int recoveryCodesLeft;
+    private bool is2faEnabled;
+    private bool isMachineRemembered;
+
+    [CascadingParameter]
+    private HttpContext HttpContext { get; set; } = default!;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var user = await UserManager.GetUserAsync(HttpContext.User);
+        if (user is null)
+        {
+            RedirectManager.RedirectToInvalidUser(UserManager, HttpContext);
+            return;
+        }
+
+        hasAuthenticator = await UserManager.GetAuthenticatorKeyAsync(user) is not null;
+        is2faEnabled = await UserManager.GetTwoFactorEnabledAsync(user);
+        isMachineRemembered = await SignInManager.IsTwoFactorClientRememberedAsync(user);
+        recoveryCodesLeft = await UserManager.CountRecoveryCodesAsync(user);
+    }
+
+    private async Task OnSubmitForgetBrowserAsync()
+    {
+        await SignInManager.ForgetTwoFactorClientAsync();
+
+        RedirectManager.RedirectToCurrentPageWithStatus(
+            "This browser has been forgotten. You'll be asked for a code the next time you sign in here.",
+            HttpContext);
+    }
+}

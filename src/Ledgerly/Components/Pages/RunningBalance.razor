@@ -1,0 +1,268 @@
+@page "/projection"
+@inject LedgerService Ledger
+
+<PageTitle>Running Balance · Ledgerly</PageTitle>
+
+<MudText Typo="Typo.h4">Running balance</MudText>
+<MudText Typo="Typo.body2" Class="mud-text-secondary mb-4">
+    Where your balance is headed as bills come out and income comes in. Starts from each account's balance as of its as-of date.
+</MudText>
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+    return;
+}
+
+@if (_accounts.Count == 0)
+{
+    <MudAlert Severity="Severity.Info">Add an account first. <MudLink Href="accounts">Go to accounts</MudLink></MudAlert>
+    return;
+}
+
+<MudPaper Elevation="1" Class="pa-3 mb-3">
+    <MudStack Row="true" Spacing="3" AlignItems="AlignItems.Center" Wrap="Wrap.Wrap">
+        <MudSelect T="int" Label="Accounts" MultiSelection="true" SelectedValues="_selected" SelectedValuesChanged="OnAccountsChanged"
+                   Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:280px"
+                   MultiSelectionTextFunc="@(_ => _selected.Count == _accounts.Count ? "All accounts" : string.Join(", ", _accounts.Where(a => _selected.Contains(a.Id)).Select(a => a.Name)))">
+            @foreach (var account in _accounts)
+            {
+                <MudSelectItem T="int" Value="account.Id">@account.Name</MudSelectItem>
+            }
+        </MudSelect>
+        <MudToggleGroup T="int" Value="_days" ValueChanged="OnDaysChanged" Color="Color.Primary" Size="Size.Small" Outlined="true">
+            @foreach (var days in DayOptions)
+            {
+                <MudToggleItem Value="days" Text="@(days < 365 ? $"{days} days" : "1 year")" />
+            }
+        </MudToggleGroup>
+        <MudTooltip Text="Worst case uses the 'up to' amount for bills that vary">
+            <MudSwitch T="bool" Value="_mode == ProjectionMode.WorstCase" ValueChanged="OnWorstCaseChanged" Label="Worst case" Color="Color.Warning" />
+        </MudTooltip>
+    </MudStack>
+</MudPaper>
+
+@if (_result is null || _selected.Count == 0)
+{
+    <MudAlert Severity="Severity.Info">Choose at least one account.</MudAlert>
+    return;
+}
+
+@{
+    var low = _result.LowestPoint;
+    var belowZero = _result.FirstBelowZero;
+    var belowThreshold = _result.FirstBelowThreshold;
+}
+
+<MudGrid Spacing="3" Class="mb-1">
+    <MudItem xs="6" md="3">
+        <StatCard Label="Starting balance" Icon="@Icons.Material.Filled.AccountBalance">
+            <Value><Money Value="_result.StartingBalance" /></Value>
+            <Caption>as of @Display.Date(_result.Accounts.Min(a => a.BalanceAsOf))</Caption>
+        </StatCard>
+    </MudItem>
+    <MudItem xs="6" md="3">
+        <StatCard Label="Money in / out" Icon="@Icons.Material.Filled.SwapVert">
+            <Value><Money Value="_result.TotalIn - _result.TotalOut" ColorPositive="true" /></Value>
+            <Caption>+@_result.TotalIn.ToString("C0") in · −@_result.TotalOut.ToString("C0") out</Caption>
+        </StatCard>
+    </MudItem>
+    <MudItem xs="6" md="3">
+        <StatCard Label="Lowest point" Icon="@Icons.Material.Filled.TrendingDown" IconColor="@(belowZero is not null ? Color.Error : belowThreshold is not null ? Color.Warning : Color.Primary)">
+            <Value><Money Value="low?.RunningBalance ?? _result.StartingBalance" /></Value>
+            <Caption>@(low is null ? "No activity" : $"{Display.Date(low.Date)} after {low.Description}")</Caption>
+        </StatCard>
+    </MudItem>
+    <MudItem xs="6" md="3">
+        <StatCard Label="@($"Balance on {_result.Through:MMM d}")" Icon="@Icons.Material.Filled.Flag">
+            <Value><Money Value="_result.EndingBalance" /></Value>
+            <Caption>@(_mode == ProjectionMode.WorstCase ? "Worst case" : "Expected amounts")</Caption>
+        </StatCard>
+    </MudItem>
+</MudGrid>
+
+@if (belowZero is not null)
+{
+    <MudAlert Severity="Severity.Error" Class="mb-3">
+        Projected to go negative on <strong>@Display.Date(belowZero.Date)</strong> when @belowZero.Description (@(-belowZero.Amount)) comes out of @belowZero.AccountName.
+    </MudAlert>
+}
+else if (belowThreshold is not null)
+{
+    <MudAlert Severity="Severity.Warning" Class="mb-3">
+        Drops below your @_result.LowBalanceThreshold?.ToString("C0") warning on <strong>@Display.Date(belowThreshold.Date)</strong> (@belowThreshold.Description).
+    </MudAlert>
+}
+@if (_unassignedBills > 0)
+{
+    <MudAlert Severity="Severity.Warning" Class="mb-3" Dense="true">
+        @_unassignedBills active bill@(_unassignedBills == 1 ? " isn't" : "s aren't") assigned to an account and @(_unassignedBills == 1 ? "isn't" : "aren't") included. <MudLink Href="bills">Review bills</MudLink>
+    </MudAlert>
+}
+
+<MudPaper Elevation="1" Class="pa-4 mb-3">
+    <MudChart T="double" ChartType="ChartType.Line" ChartSeries="_series" ChartLabels="_labels" ChartOptions="_chartOptions" Height="320px" Width="100%" />
+</MudPaper>
+
+<MudPaper Elevation="1">
+    <MudTable Items="_result.Entries" Dense="true" Hover="true" Breakpoint="Breakpoint.Sm" Elevation="0" RowClassFunc="RowClass">
+        <HeaderContent>
+            <MudTh>Date</MudTh>
+            <MudTh>Description</MudTh>
+            @if (_selected.Count > 1)
+            {
+                <MudTh>Account</MudTh>
+            }
+            <MudTh Style="text-align:right">Amount</MudTh>
+            <MudTh Style="text-align:right">Balance</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd DataLabel="Date">
+                <span class="@(context.Date < Ledger.Today ? "mud-text-secondary" : null)">@Display.ShortDate(context.Date)</span>
+            </MudTd>
+            <MudTd DataLabel="Description">
+                <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center">
+                    <MudIcon Icon="@(context.Kind == ProjectionEntryKind.Income ? Icons.Material.Filled.ArrowDownward : Icons.Material.Filled.ArrowUpward)"
+                             Color="@(context.Kind == ProjectionEntryKind.Income ? Color.Success : Color.Default)" Size="Size.Small" />
+                    <span>@context.Description</span>
+                    @if (context.IsPaid)
+                    {
+                        <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Outlined">Paid</MudChip>
+                    }
+                    else if (context.Kind == ProjectionEntryKind.Bill && context.Date < Ledger.Today)
+                    {
+                        <MudTooltip Text="Due since this account's balance date and not marked paid">
+                            <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Outlined">Not yet paid</MudChip>
+                        </MudTooltip>
+                    }
+                </MudStack>
+            </MudTd>
+            @if (_selected.Count > 1)
+            {
+                <MudTd DataLabel="Account">@context.AccountName</MudTd>
+            }
+            <MudTd DataLabel="Amount" Style="text-align:right; white-space:nowrap">
+                @(context.IsEstimate ? "≈ " : "")<Money Value="context.Amount" ColorPositive="true" />
+            </MudTd>
+            <MudTd DataLabel="Balance" Style="text-align:right"><strong><Money Value="context.RunningBalance" /></strong></MudTd>
+        </RowTemplate>
+        <NoRecordsContent>
+            <MudText Class="py-6 mud-text-secondary">No bills or income in this period.</MudText>
+        </NoRecordsContent>
+    </MudTable>
+</MudPaper>
+
+@code {
+    private static readonly int[] DayOptions = [30, 60, 90, 180, 365];
+
+    [SupplyParameterFromQuery(Name = "accounts")] private string? AccountsQuery { get; set; }
+
+    private bool _loading = true;
+    private List<Account> _accounts = [];
+    private List<Bill> _bills = [];
+    private List<Income> _incomes = [];
+    private IReadOnlyCollection<int> _selected = [];
+    private int _days = 60;
+    private ProjectionMode _mode = ProjectionMode.Expected;
+    private ProjectionResult? _result;
+    private int _unassignedBills;
+
+    private List<ChartSeries<double>> _series = [];
+    private string[] _labels = [];
+    private readonly LineChartOptions _chartOptions = new()
+    {
+        YAxisFormat = "C0",
+        YAxisTicks = 500,
+        MaxNumYAxisTicks = 8,
+        ShowLegend = true,
+        LineStrokeWidth = 2,
+        XAxisLines = false,
+        YAxisLines = true,
+        InterpolationOption = InterpolationOption.Straight
+    };
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _accounts = await Ledger.GetAccountsAsync(activeOnly: true);
+        _bills = await Ledger.GetBillsAsync();
+        _incomes = await Ledger.GetIncomesAsync();
+        _unassignedBills = _bills.Count(b => b.IsActive && b.PayFromAccountId is null);
+
+        var requested = (AccountsQuery ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries)
+            .Select(s => int.TryParse(s, out var id) ? id : 0)
+            .Where(id => _accounts.Any(a => a.Id == id))
+            .ToHashSet();
+
+        // Default to checking accounts, since that's where most bills come from.
+        var checking = _accounts.Where(a => a.Type == AccountType.Checking).Select(a => a.Id).ToHashSet();
+        _selected = requested.Count > 0 ? requested : checking.Count > 0 ? checking : _accounts.Select(a => a.Id).ToHashSet();
+
+        Recalculate();
+        _loading = false;
+    }
+
+    private void OnAccountsChanged(IEnumerable<int> ids)
+    {
+        _selected = ids.ToHashSet();
+        Recalculate();
+    }
+
+    private void OnDaysChanged(int days)
+    {
+        _days = days;
+        Recalculate();
+    }
+
+    private void OnWorstCaseChanged(bool worstCase)
+    {
+        _mode = worstCase ? ProjectionMode.WorstCase : ProjectionMode.Expected;
+        Recalculate();
+    }
+
+    private void Recalculate()
+    {
+        var accounts = _accounts.Where(a => _selected.Contains(a.Id)).ToList();
+        if (accounts.Count == 0)
+        {
+            _result = null;
+            return;
+        }
+
+        _result = Projection.Build(accounts, _bills, _incomes, Ledger.Today.AddDays(_days), _mode);
+        BuildChart(_result);
+    }
+
+    /// <summary>One point per day: the balance at the end of that day.</summary>
+    private void BuildChart(ProjectionResult result)
+    {
+        var start = result.Accounts.Min(a => a.BalanceAsOf);
+        if (start > Ledger.Today)
+            start = Ledger.Today;
+
+        var totalDays = result.Through.DayNumber - start.DayNumber + 1;
+        var labelEvery = totalDays <= 31 ? 7 : totalDays <= 95 ? 14 : 30;
+        var balances = new double[totalDays];
+        var labels = new string[totalDays];
+        var running = result.StartingBalance;
+        var index = 0;
+
+        for (var day = 0; day < totalDays; day++)
+        {
+            var date = start.AddDays(day);
+            while (index < result.Entries.Count && result.Entries[index].Date <= date)
+                running = result.Entries[index++].RunningBalance;
+
+            balances[day] = (double)running;
+            labels[day] = day % labelEvery == 0 ? date.ToString("MMM d") : "";
+        }
+
+        _labels = labels;
+        _series = [new ChartSeries<double> { Name = "Balance", Data = balances }];
+
+        if (result.LowBalanceThreshold is { } threshold)
+            _series.Add(new ChartSeries<double> { Name = "Low balance warning", Data = Enumerable.Repeat((double)threshold, totalDays).ToArray() });
+    }
+
+    private string RowClass(ProjectionEntry entry, int _) =>
+        entry.RunningBalance < 0 ? "row-negative" : _result?.IsBelowThreshold(entry.RunningBalance) == true ? "row-low" : "";
+}

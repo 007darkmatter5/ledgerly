@@ -1,0 +1,193 @@
+@if (Schedule.NeverPaysOff)
+{
+    <MudAlert Severity="Severity.Error" Class="mb-3">
+        A payment of @Schedule.ScheduledPayment.ToString("C") doesn't cover the monthly interest, so this balance never gets paid off.
+    </MudAlert>
+}
+
+<MudGrid Spacing="3" Class="mb-1">
+    <MudItem xs="6" md="3">
+        <StatCard Label="Monthly payment" Icon="@Icons.Material.Filled.Payments">
+            <Value>@Schedule.ScheduledPayment.ToString("C")</Value>
+            <Caption>@(ExtraPrincipal > 0 ? $"+ {ExtraPrincipal:C} extra principal" : "principal & interest")</Caption>
+        </StatCard>
+    </MudItem>
+    <MudItem xs="6" md="3">
+        <StatCard Label="Payoff" Icon="@Icons.Material.Filled.Flag">
+            <Value>@(Schedule.PayoffDate?.ToString("MMM yyyy") ?? "Never")</Value>
+            <Caption>@Schedule.NumberOfPayments payments · @Display.Months(Schedule.NumberOfPayments)</Caption>
+        </StatCard>
+    </MudItem>
+    <MudItem xs="6" md="3">
+        <StatCard Label="Total interest" Icon="@Icons.Material.Filled.Percent">
+            <Value>@Schedule.TotalInterest.ToString("C")</Value>
+            <Caption>of @Schedule.TotalPaid.ToString("C") total paid</Caption>
+        </StatCard>
+    </MudItem>
+    <MudItem xs="6" md="3">
+        @if (Comparison is not null && HasAnyExtra && !Comparison.NeverPaysOff)
+        {
+            <StatCard Label="Extra payments save" Icon="@Icons.Material.Filled.Savings" IconColor="Color.Success">
+                <Value><span class="mud-success-text">@((Comparison.TotalInterest - Schedule.TotalInterest).ToString("C"))</span></Value>
+                <Caption>in interest, and @Display.Months(Comparison.NumberOfPayments - Schedule.NumberOfPayments) sooner</Caption>
+            </StatCard>
+        }
+        else
+        {
+            <StatCard Label="Principal" Icon="@Icons.Material.Filled.AccountBalance">
+                <Value>@Schedule.Principal.ToString("C")</Value>
+                <Caption>@Schedule.AnnualRatePercent.ToString("0.###")% APR</Caption>
+            </StatCard>
+        }
+    </MudItem>
+</MudGrid>
+
+@if (Schedule.Rows.Count > 0)
+{
+    <MudPaper Elevation="1" Class="pa-4 mb-3">
+        <MudText Typo="Typo.subtitle1" Class="mb-2">Balance over time</MudText>
+        <MudChart T="double" ChartType="ChartType.Line" ChartSeries="_series" ChartLabels="_labels" ChartOptions="_chartOptions" Height="300px" Width="100%" />
+    </MudPaper>
+
+    <MudPaper Elevation="1">
+        <MudStack Row="true" AlignItems="AlignItems.Center" Class="px-4 pt-3">
+            <MudText Typo="Typo.subtitle1">Amortization table</MudText>
+            <MudSpacer />
+            <MudToggleGroup T="bool" @bind-Value="_yearly" Size="Size.Small" Color="Color.Primary" Outlined="true">
+                <MudToggleItem Value="false" Text="Monthly" />
+                <MudToggleItem Value="true" Text="Yearly" />
+            </MudToggleGroup>
+        </MudStack>
+
+        @if (_yearly)
+        {
+            <MudTable Items="_years" Dense="true" Hover="true" Breakpoint="Breakpoint.Sm" Elevation="0" FixedHeader="true">
+                <HeaderContent>
+                    <MudTh>Year</MudTh>
+                    <MudTh Style="text-align:right">Payments</MudTh>
+                    <MudTh Style="text-align:right">Principal</MudTh>
+                    <MudTh Style="text-align:right">Interest</MudTh>
+                    @if (HasExtra)
+                    {
+                        <MudTh Style="text-align:right">Extra</MudTh>
+                    }
+                    <MudTh Style="text-align:right">Total paid</MudTh>
+                    <MudTh Style="text-align:right">Ending balance</MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    <MudTd DataLabel="Year">@context.Year</MudTd>
+                    <MudTd DataLabel="Payments" Style="text-align:right">@context.Payments</MudTd>
+                    <MudTd DataLabel="Principal" Style="text-align:right">@context.Principal.ToString("C")</MudTd>
+                    <MudTd DataLabel="Interest" Style="text-align:right">@context.Interest.ToString("C")</MudTd>
+                    @if (HasExtra)
+                    {
+                        <MudTd DataLabel="Extra" Style="text-align:right">@context.Extra.ToString("C")</MudTd>
+                    }
+                    <MudTd DataLabel="Total paid" Style="text-align:right">@context.TotalPaid.ToString("C")</MudTd>
+                    <MudTd DataLabel="Ending balance" Style="text-align:right"><strong>@context.EndingBalance.ToString("C")</strong></MudTd>
+                </RowTemplate>
+            </MudTable>
+        }
+        else
+        {
+            <MudTable Items="Schedule.Rows" Dense="true" Hover="true" Breakpoint="Breakpoint.Sm" Elevation="0" RowsPerPage="12" RowClassFunc="RowClass">
+                <HeaderContent>
+                    <MudTh>#</MudTh>
+                    <MudTh>Date</MudTh>
+                    <MudTh Style="text-align:right">Payment</MudTh>
+                    <MudTh Style="text-align:right">Principal</MudTh>
+                    <MudTh Style="text-align:right">Interest</MudTh>
+                    @if (HasExtra)
+                    {
+                        <MudTh Style="text-align:right">Extra</MudTh>
+                    }
+                    <MudTh Style="text-align:right">Balance</MudTh>
+                    <MudTh Style="text-align:right">Interest to date</MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    <MudTd DataLabel="#">@context.Number</MudTd>
+                    <MudTd DataLabel="Date">@context.Date.ToString("MMM yyyy")</MudTd>
+                    <MudTd DataLabel="Payment" Style="text-align:right">@context.Payment.ToString("C")</MudTd>
+                    <MudTd DataLabel="Principal" Style="text-align:right">@context.Principal.ToString("C")</MudTd>
+                    <MudTd DataLabel="Interest" Style="text-align:right">@context.Interest.ToString("C")</MudTd>
+                    @if (HasExtra)
+                    {
+                        <MudTd DataLabel="Extra" Style="text-align:right; white-space:nowrap">@((context.ExtraPrincipal + context.AdditionalPrincipal).ToString("C"))@if (context.AdditionalPrincipal > 0) { <MudTooltip Text="@($"Includes {context.AdditionalPrincipal:C} in one-time extra payments")"><MudIcon Icon="@Icons.Material.Filled.Star" Color="Color.Success" Size="Size.Small" Class="ml-1" Style="vertical-align:middle" /></MudTooltip> }</MudTd>
+                    }
+                    <MudTd DataLabel="Balance" Style="text-align:right"><strong>@context.Balance.ToString("C")</strong></MudTd>
+                    <MudTd DataLabel="Interest to date" Style="text-align:right">@context.CumulativeInterest.ToString("C")</MudTd>
+                </RowTemplate>
+                <PagerContent>
+                    <MudTablePager PageSizeOptions="[12, 24, 60, 120, int.MaxValue]" />
+                </PagerContent>
+            </MudTable>
+        }
+    </MudPaper>
+}
+
+@code {
+    [Parameter, EditorRequired] public AmortizationSchedule Schedule { get; set; } = null!;
+
+    /// <summary>The same loan without extra payments, to show what the extra saves.</summary>
+    [Parameter] public AmortizationSchedule? Comparison { get; set; }
+
+    [Parameter] public decimal ExtraPrincipal { get; set; }
+
+    /// <summary>Highlights payments dated in this month (e.g. the current one).</summary>
+    [Parameter] public DateOnly? HighlightMonth { get; set; }
+
+    private record YearSummary(int Year, int Payments, decimal Principal, decimal Interest, decimal Extra, decimal TotalPaid, decimal EndingBalance);
+
+    private bool _yearly;
+    private List<YearSummary> _years = [];
+    private List<ChartSeries<double>> _series = [];
+    private string[] _labels = [];
+    private AmortizationSchedule? _renderedSchedule;
+    private AmortizationSchedule? _renderedComparison;
+
+    private readonly LineChartOptions _chartOptions = new()
+    {
+        YAxisFormat = "C0",
+        MaxNumYAxisTicks = 6,
+        ShowLegend = true,
+        LineStrokeWidth = 2,
+        XAxisLines = false
+    };
+
+    private bool HasExtra => Schedule.Rows.Any(r => r.ExtraPrincipal > 0 || r.AdditionalPrincipal > 0);
+
+    /// <summary>Planned monthly extra or one-time extra payments, so a comparison without them is meaningful.</summary>
+    private bool HasAnyExtra => ExtraPrincipal > 0 || Schedule.Rows.Any(r => r.AdditionalPrincipal > 0);
+
+    protected override void OnParametersSet()
+    {
+        if (ReferenceEquals(Schedule, _renderedSchedule) && ReferenceEquals(Comparison, _renderedComparison))
+            return;
+        _renderedSchedule = Schedule;
+        _renderedComparison = Comparison;
+
+        _years = Schedule.Rows
+            .GroupBy(r => r.Date.Year)
+            .Select(g => new YearSummary(g.Key, g.Count(), g.Sum(r => r.Principal), g.Sum(r => r.Interest), g.Sum(r => r.ExtraPrincipal + r.AdditionalPrincipal), g.Sum(r => r.TotalPaid), g.Last().Balance))
+            .ToList();
+
+        // Chart one point per month, labeled yearly (or less often for long loans).
+        var showComparison = Comparison is { NeverPaysOff: false } && HasAnyExtra && Comparison.NumberOfPayments > Schedule.NumberOfPayments;
+        var points = Math.Max(Schedule.NumberOfPayments, showComparison ? Comparison!.NumberOfPayments : 0) + 1;
+        var labelEvery = points <= 72 ? 12 : points <= 240 ? 24 : 60;
+        var first = Schedule.Rows.Count > 0 ? Schedule.Rows[0].Date.AddMonths(-1) : default;
+
+        _labels = Enumerable.Range(0, points).Select(i => i % labelEvery == 0 ? first.AddMonths(i).ToString("yyyy") : "").ToArray();
+        _series = [new ChartSeries<double> { Name = HasAnyExtra ? "With extra payments" : "Balance", Data = Balances(Schedule, points) }];
+        if (showComparison)
+            _series.Add(new ChartSeries<double> { Name = "Without extra payments", Data = Balances(Comparison!, points) });
+    }
+
+    private static double[] Balances(AmortizationSchedule schedule, int points) =>
+        Enumerable.Range(0, points)
+            .Select(i => i == 0 ? (double)schedule.Principal : i <= schedule.Rows.Count ? (double)schedule.Rows[i - 1].Balance : 0d)
+            .ToArray();
+
+    private string RowClass(AmortizationRow row, int _) =>
+        HighlightMonth is { } m && row.Date.Year == m.Year && row.Date.Month == m.Month ? "row-current" : "";
+}

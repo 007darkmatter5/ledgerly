@@ -1,0 +1,6 @@
+* text=auto
+
+# Shell scripts run on Linux servers and must keep LF line endings.
+*.sh text eol=lf
+Dockerfile text eol=lf
+VERSION text eol=lf

@@ -1,0 +1,65 @@
+@page "/Account/Manage/GenerateRecoveryCodes"
+
+@inject UserManager<ApplicationUser> UserManager
+@inject IdentityRedirectManager RedirectManager
+@inject ILogger<GenerateRecoveryCodes> Logger
+
+<PageTitle>Recovery codes · Ledgerly</PageTitle>
+
+@if (recoveryCodes is not null)
+{
+    <ShowRecoveryCodes RecoveryCodes="recoveryCodes.ToArray()" StatusMessage="@message" />
+}
+else
+{
+    <h2 class="acct-subtitle">Generate new recovery codes</h2>
+    <div class="acct-alert acct-alert-warning" role="alert">
+        Your old recovery codes will stop working. Keep the new ones somewhere safe; they're the only way in if you lose your authenticator device.
+    </div>
+    <form @formname="generate-recovery-codes" @onsubmit="OnSubmitAsync" method="post">
+        <AntiforgeryToken />
+        <div class="acct-actions">
+            <button class="acct-btn acct-btn-danger" type="submit">Generate new codes</button>
+            <a href="Account/Manage/TwoFactorAuthentication" class="acct-btn acct-btn-outline">Cancel</a>
+        </div>
+    </form>
+}
+
+@code {
+    private string? message;
+    private ApplicationUser? user;
+    private IEnumerable<string>? recoveryCodes;
+
+    [CascadingParameter]
+    private HttpContext HttpContext { get; set; } = default!;
+
+    protected override async Task OnInitializedAsync()
+    {
+        user = await UserManager.GetUserAsync(HttpContext.User);
+        if (user is null)
+        {
+            RedirectManager.RedirectToInvalidUser(UserManager, HttpContext);
+            return;
+        }
+
+        if (!await UserManager.GetTwoFactorEnabledAsync(user))
+        {
+            RedirectManager.RedirectToWithStatus("Account/Manage/TwoFactorAuthentication", "Error: Turn on two-factor authentication first.", HttpContext);
+        }
+    }
+
+    private async Task OnSubmitAsync()
+    {
+        if (user is null)
+        {
+            RedirectManager.RedirectToInvalidUser(UserManager, HttpContext);
+            return;
+        }
+
+        var userId = await UserManager.GetUserIdAsync(user);
+        recoveryCodes = await UserManager.GenerateNewTwoFactorRecoveryCodesAsync(user, 10);
+        message = "You have generated new recovery codes.";
+
+        Logger.LogInformation("User with ID '{UserId}' has generated new 2FA recovery codes.", userId);
+    }
+}

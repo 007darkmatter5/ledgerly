@@ -1,0 +1,64 @@
+@page "/Account/Manage/Disable2fa"
+
+@inject UserManager<ApplicationUser> UserManager
+@inject IdentityRedirectManager RedirectManager
+@inject ILogger<Disable2fa> Logger
+
+<PageTitle>Turn off two-factor authentication · Ledgerly</PageTitle>
+
+<StatusMessage />
+<h2 class="acct-subtitle">Turn off two-factor authentication</h2>
+
+<div class="acct-alert acct-alert-warning" role="alert">
+    Your account will only be protected by your password. Your authenticator app's key isn't changed;
+    to change it, <a href="Account/Manage/ResetAuthenticator">reset your authenticator key</a> instead.
+</div>
+
+<form @formname="disable-2fa" @onsubmit="OnSubmitAsync" method="post">
+    <AntiforgeryToken />
+    <div class="acct-actions">
+        <button class="acct-btn acct-btn-danger" type="submit">Turn off two-factor authentication</button>
+        <a href="Account/Manage/TwoFactorAuthentication" class="acct-btn acct-btn-outline">Cancel</a>
+    </div>
+</form>
+
+@code {
+    private ApplicationUser? user;
+
+    [CascadingParameter]
+    private HttpContext HttpContext { get; set; } = default!;
+
+    protected override async Task OnInitializedAsync()
+    {
+        user = await UserManager.GetUserAsync(HttpContext.User);
+        if (user is null)
+        {
+            RedirectManager.RedirectToInvalidUser(UserManager, HttpContext);
+            return;
+        }
+
+        if (HttpMethods.IsGet(HttpContext.Request.Method) && !await UserManager.GetTwoFactorEnabledAsync(user))
+        {
+            RedirectManager.RedirectToWithStatus("Account/Manage/TwoFactorAuthentication", "Two-factor authentication is already off.", HttpContext);
+        }
+    }
+
+    private async Task OnSubmitAsync()
+    {
+        if (user is null)
+        {
+            RedirectManager.RedirectToInvalidUser(UserManager, HttpContext);
+            return;
+        }
+
+        var disable2faResult = await UserManager.SetTwoFactorEnabledAsync(user, false);
+        if (!disable2faResult.Succeeded)
+        {
+            throw new InvalidOperationException("Unexpected error occurred disabling 2FA.");
+        }
+
+        var userId = await UserManager.GetUserIdAsync(user);
+        Logger.LogInformation("User with ID '{UserId}' has disabled 2fa.", userId);
+        RedirectManager.RedirectToWithStatus("Account/Manage/TwoFactorAuthentication", "Two-factor authentication has been turned off.", HttpContext);
+    }
+}

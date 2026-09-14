@@ -1,0 +1,29 @@
+﻿<MudPaper Elevation="1" Class="pa-4" Style="height:100%">
+    <MudStack Row="true" AlignItems="AlignItems.Start" Justify="Justify.SpaceBetween">
+        <MudStack Spacing="1">
+            <MudText Typo="Typo.subtitle2" Class="mud-text-secondary">@Label</MudText>
+            <MudText Typo="Typo.h5">@Value</MudText>
+            @if (Caption is not null)
+            {
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">@Caption</MudText>
+            }
+        </MudStack>
+        @if (Href is not null)
+        {
+            <MudIconButton Icon="@Icon" Color="IconColor" Href="@Href" aria-label="@Label" />
+        }
+        else
+        {
+            <MudIcon Icon="@Icon" Color="IconColor" Class="ma-2" />
+        }
+    </MudStack>
+</MudPaper>
+
+@code {
+    [Parameter, EditorRequired] public string Label { get; set; } = "";
+    [Parameter] public string Icon { get; set; } = Icons.Material.Filled.Info;
+    [Parameter] public Color IconColor { get; set; } = Color.Primary;
+    [Parameter] public string? Href { get; set; }
+    [Parameter] public RenderFragment? Value { get; set; }
+    [Parameter] public RenderFragment? Caption { get; set; }
+}
