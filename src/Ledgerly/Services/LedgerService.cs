@@ -89,6 +89,27 @@ public class LedgerService(IDbContextFactory<LedgerlyDbContext> dbFactory, ICurr
         await SetActiveLedgerAsync(db, userId, await GetOrCreateLedgerAsync(db, userId, isSample: false));
     }
 
+    /// <summary>Remembers the Running Balance selection on the active ledger. Ids outside the ledger are dropped.</summary>
+    public async Task SaveProjectionViewAsync(IEnumerable<int> accountIds, int days, bool worstCase)
+    {
+        var ledger = await GetActiveLedgerAsync();
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var requested = accountIds.ToHashSet();
+        var valid = await db.Accounts.Where(a => a.LedgerId == ledger.Id && requested.Contains(a.Id))
+            .Select(a => a.Id).ToListAsync();
+        var ids = valid.Count == 0 ? null : string.Join(',', valid.Order());
+
+        await db.Ledgers.Where(l => l.Id == ledger.Id && l.OwnerId == ledger.OwnerId)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(l => l.ProjectionAccountIds, ids)
+                .SetProperty(l => l.ProjectionDays, days)
+                .SetProperty(l => l.ProjectionWorstCase, worstCase));
+
+        ledger.ProjectionAccountIds = ids;
+        ledger.ProjectionDays = days;
+        ledger.ProjectionWorstCase = worstCase;
+    }
+
     // Accounts
 
     public async Task<List<Account>> GetAccountsAsync(bool activeOnly = false)

@@ -158,6 +158,31 @@ public sealed class LedgerServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Running_balance_view_is_remembered_per_ledger_and_ignores_other_users_accounts()
+    {
+        var alice = ServiceFor("alice");
+        var checking = new Account { Name = "Checking" };
+        var savings = new Account { Name = "Savings" };
+        await alice.SaveAccountAsync(checking);
+        await alice.SaveAccountAsync(savings);
+
+        var bob = ServiceFor("bob");
+        var bobs = new Account { Name = "Bob's" };
+        await bob.SaveAccountAsync(bobs);
+
+        await alice.SaveProjectionViewAsync([savings.Id, checking.Id, bobs.Id], 90, worstCase: true);
+
+        var ledger = await ServiceFor("alice").GetActiveLedgerAsync();
+        Assert.Equal($"{Math.Min(checking.Id, savings.Id)},{Math.Max(checking.Id, savings.Id)}", ledger.ProjectionAccountIds);
+        Assert.Equal(90, ledger.ProjectionDays);
+        Assert.True(ledger.ProjectionWorstCase);
+        Assert.Null((await ServiceFor("bob").GetActiveLedgerAsync()).ProjectionAccountIds);
+
+        await alice.StartSampleAsync();
+        Assert.Null((await alice.GetActiveLedgerAsync()).ProjectionAccountIds);
+    }
+
+    [Fact]
     public async Task Deleting_a_payee_keeps_its_bills_and_loans()
     {
         var alice = ServiceFor("alice");

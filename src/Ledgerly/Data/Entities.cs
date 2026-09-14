@@ -52,6 +52,12 @@ public class Ledger
     public string Name { get; set; } = "";
     public bool IsSample { get; set; }
     public DateTime CreatedAt { get; set; }
+
+    // Last Running Balance view, remembered per ledger since account ids belong to one ledger.
+    /// <summary>Comma-separated account ids; null means the default (checking accounts).</summary>
+    public string? ProjectionAccountIds { get; set; }
+    public int? ProjectionDays { get; set; }
+    public bool ProjectionWorstCase { get; set; }
 }
 
 /// <summary>An app-wide setting managed by admins (not per user or ledger).</summary>

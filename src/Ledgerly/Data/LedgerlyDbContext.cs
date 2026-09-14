@@ -28,6 +28,7 @@ public class LedgerlyDbContext(DbContextOptions<LedgerlyDbContext> options) : Id
         modelBuilder.Entity<Ledger>(e =>
         {
             e.Property(l => l.Name).HasMaxLength(100);
+            e.Property(l => l.ProjectionAccountIds).HasMaxLength(1000);
             // Deleting a user deletes their ledgers, and with them all of their data.
             e.HasOne<ApplicationUser>().WithMany().HasForeignKey(l => l.OwnerId).OnDelete(DeleteBehavior.Cascade);
             // One personal ledger and at most one sample ledger per user.

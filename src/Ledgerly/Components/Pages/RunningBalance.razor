@@ -188,35 +188,52 @@ else if (belowThreshold is not null)
         _incomes = await Ledger.GetIncomesAsync();
         _unassignedBills = _bills.Count(b => b.IsActive && b.PayFromAccountId is null);
 
-        var requested = (AccountsQuery ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries)
-            .Select(s => int.TryParse(s, out var id) ? id : 0)
-            .Where(id => _accounts.Any(a => a.Id == id))
-            .ToHashSet();
+        var ledger = await Ledger.GetActiveLedgerAsync();
+        _days = DayOptions.Contains(ledger.ProjectionDays ?? 0) ? ledger.ProjectionDays!.Value : 60;
+        _mode = ledger.ProjectionWorstCase ? ProjectionMode.WorstCase : ProjectionMode.Expected;
 
-        // Default to checking accounts, since that's where most bills come from.
+        // A link's ?accounts= wins, then the last selection, then checking accounts (where most bills come from).
+        var requested = ParseAccountIds(AccountsQuery);
+        var remembered = ParseAccountIds(ledger.ProjectionAccountIds);
         var checking = _accounts.Where(a => a.Type == AccountType.Checking).Select(a => a.Id).ToHashSet();
-        _selected = requested.Count > 0 ? requested : checking.Count > 0 ? checking : _accounts.Select(a => a.Id).ToHashSet();
+        _selected = requested.Count > 0 ? requested
+            : remembered.Count > 0 ? remembered
+            : checking.Count > 0 ? checking
+            : _accounts.Select(a => a.Id).ToHashSet();
 
         Recalculate();
         _loading = false;
     }
 
-    private void OnAccountsChanged(IEnumerable<int> ids)
+    /// <summary>Ids from a comma-separated list that are active accounts in this ledger.</summary>
+    private HashSet<int> ParseAccountIds(string? list) =>
+        (list ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries)
+            .Select(s => int.TryParse(s, out var id) ? id : 0)
+            .Where(id => _accounts.Any(a => a.Id == id))
+            .ToHashSet();
+
+    private Task OnAccountsChanged(IEnumerable<int> ids)
     {
         _selected = ids.ToHashSet();
-        Recalculate();
+        return RecalculateAndRememberAsync();
     }
 
-    private void OnDaysChanged(int days)
+    private Task OnDaysChanged(int days)
     {
         _days = days;
-        Recalculate();
+        return RecalculateAndRememberAsync();
     }
 
-    private void OnWorstCaseChanged(bool worstCase)
+    private Task OnWorstCaseChanged(bool worstCase)
     {
         _mode = worstCase ? ProjectionMode.WorstCase : ProjectionMode.Expected;
+        return RecalculateAndRememberAsync();
+    }
+
+    private Task RecalculateAndRememberAsync()
+    {
         Recalculate();
+        return Ledger.SaveProjectionViewAsync(_selected, _days, _mode == ProjectionMode.WorstCase);
     }
 
     private void Recalculate()
