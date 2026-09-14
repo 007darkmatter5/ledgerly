@@ -18,6 +18,16 @@ page.on('websocket', (ws) => {
   ws.on('socketerror', (e) => note(`websocket error: ${e}`));
 });
 
+// After a full page load the button renders before the interactive connection is ready, so a
+// click can be lost. Click again until the dialog opens.
+async function openDialog(buttonText) {
+  for (let attempt = 0; attempt < 10; attempt++) {
+    await page.click(`text=${buttonText}`);
+    if (await page.waitForSelector('.mud-dialog input', { timeout: 3000 }).then(() => true, () => false)) return;
+  }
+  throw new Error(`"${buttonText}" did not open its dialog`);
+}
+
 let failed = false;
 try {
   await page.goto(`${base}/Account/Register`);
@@ -46,7 +56,7 @@ try {
 
   // Categories: add one through the dialog and see it listed.
   await page.goto(`${base}/categories`);
-  await page.click('text=Add category');
+  await openDialog('Add category');
   await page.fill('.mud-dialog input', 'E2E Groceries');
   await page.click('.mud-dialog button:has-text("Save")');
   const categoryListed = await page.waitForSelector('.mud-table-body >> text=E2E Groceries', { timeout: 5000 }).then(() => true, () => false);
@@ -55,7 +65,7 @@ try {
 
   // Payees: add one with a website and see its link listed.
   await page.goto(`${base}/payees`);
-  await page.click('text=Add payee');
+  await openDialog('Add payee');
   await page.fill('.mud-dialog input >> nth=0', 'E2E Power Co');
   await page.fill('.mud-dialog input[type=url]', 'power.example.com');
   await page.click('.mud-dialog button:has-text("Save")');
