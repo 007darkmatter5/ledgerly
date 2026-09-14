@@ -113,6 +113,23 @@ public sealed class LedgerServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Lender_website_is_normalized_and_unsafe_links_are_rejected()
+    {
+        var alice = ServiceFor("alice");
+        var loan = new Loan { Name = "Car", OriginalPrincipal = 20_000m, AnnualRatePercent = 5m, TermMonths = 60, FirstPaymentDate = new DateOnly(2026, 1, 15), LenderUrl = "mycreditunion.org/pay" };
+        await alice.SaveLoanAsync(loan);
+        Assert.Equal("https://mycreditunion.org/pay", (await alice.GetLoanAsync(loan.Id))!.LenderUrl);
+
+        loan.LenderUrl = "javascript:alert(document.cookie)";
+        await Assert.ThrowsAsync<LedgerValidationException>(() => alice.SaveLoanAsync(loan));
+        Assert.Equal("https://mycreditunion.org/pay", (await alice.GetLoanAsync(loan.Id))!.LenderUrl);
+
+        loan.LenderUrl = "  ";
+        await alice.SaveLoanAsync(loan);
+        Assert.Null((await alice.GetLoanAsync(loan.Id))!.LenderUrl);
+    }
+
+    [Fact]
     public async Task Categories_are_private_unique_per_ledger_and_trimmed()
     {
         var alice = ServiceFor("alice");

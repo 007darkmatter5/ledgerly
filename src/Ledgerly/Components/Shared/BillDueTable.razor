@@ -26,6 +26,7 @@
                 var extra = LoanPayments.ExtraPortion(context.Bill, kind, context.Amount);
                 <MudText Typo="Typo.caption" Class="@(extra > 0 ? "mud-success-text" : "mud-text-secondary")">
                     @loan.Name · @(kind == LoanPaymentKind.ExtraPrincipal ? "extra to principal" : extra > 0 ? $"monthly payment + {extra:C} extra" : "monthly payment")
+                    <ExternalLink Url="@loan.LenderUrl" IconOnly="true" Title="@($"Pay on {loan.Lender ?? "the lender's"} website")" />
                 </MudText>
             }
             @if (!string.IsNullOrWhiteSpace(context.Occurrence?.Notes))

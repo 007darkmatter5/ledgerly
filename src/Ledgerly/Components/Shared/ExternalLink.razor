@@ -1,0 +1,28 @@
+@* A link to an outside website that opens in a new tab. Renders nothing unless the address is a safe http(s) URL. *@
+@if (SafeUrl is not null)
+{
+    @if (IconOnly)
+    {
+        <MudTooltip Text="@(Title ?? $"Open {WebLinks.DisplayHost(SafeUrl)}")">
+            <a href="@SafeUrl" target="_blank" rel="noopener noreferrer" class="external-link-icon" aria-label="@(Title ?? $"Open {WebLinks.DisplayHost(SafeUrl)} in a new tab")"
+               @onclick:stopPropagation="true">
+                <MudIcon Icon="@Icons.Material.Filled.OpenInNew" Size="Size.Small" />
+            </a>
+        </MudTooltip>
+    }
+    else
+    {
+        <a href="@SafeUrl" target="_blank" rel="noopener noreferrer" class="external-link" @onclick:stopPropagation="true">
+            @(ChildContent ?? (RenderFragment)(b => b.AddContent(0, WebLinks.DisplayHost(SafeUrl))))<MudIcon Icon="@Icons.Material.Filled.OpenInNew" Size="Size.Small" Class="ml-1" Style="font-size:0.9em; vertical-align:-0.1em" />
+        </a>
+    }
+}
+
+@code {
+    [Parameter, EditorRequired] public string? Url { get; set; }
+    [Parameter] public bool IconOnly { get; set; }
+    [Parameter] public string? Title { get; set; }
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    private string? SafeUrl => WebLinks.TryNormalize(Url, out var url) ? url : null;
+}

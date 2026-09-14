@@ -18,6 +18,13 @@
                         }
                     </MudSelect>
                 </MudItem>
+                <MudItem xs="12">
+                    <MudTextField @bind-Value="Model.LenderUrl" Label="Lender website (optional)" MaxLength="@WebLinks.MaxLength" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                  InputType="InputType.Url" Placeholder="https://www.mybank.com" Clearable="true"
+                                  Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Link"
+                                  HelperText="For example, the lender's sign-in or payment page"
+                                  Validation="@(new Func<string?, string?>(ValidateUrl))" />
+                </MudItem>
 
                 <MudItem xs="12"><MudText Typo="Typo.subtitle2">Original terms</MudText></MudItem>
                 <MudItem xs="12" sm="4">
@@ -85,6 +92,9 @@
         _firstPayment = Model.Id == 0 ? null : Model.FirstPaymentDate;
         _balanceAsOf = Model.BalanceAsOf ?? Ledger.Today;
     }
+
+    private static string? ValidateUrl(string? url) =>
+        WebLinks.TryNormalize(url, out _) ? null : "Enter a web address, like https://www.mybank.com";
 
     private async Task SaveAsync()
     {

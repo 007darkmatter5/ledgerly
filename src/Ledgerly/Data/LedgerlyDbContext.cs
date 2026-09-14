@@ -78,6 +78,7 @@ public class LedgerlyDbContext(DbContextOptions<LedgerlyDbContext> options) : Id
         modelBuilder.Entity<Loan>(e =>
         {
             e.Property(l => l.Name).HasMaxLength(100);
+            e.Property(l => l.LenderUrl).HasMaxLength(WebLinks.MaxLength);
             e.Property(l => l.Type).HasConversion<string>().HasMaxLength(20);
             e.HasOne<Ledger>().WithMany().HasForeignKey(l => l.LedgerId).OnDelete(DeleteBehavior.Cascade);
         });

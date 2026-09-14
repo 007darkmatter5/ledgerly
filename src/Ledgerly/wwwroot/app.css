@@ -17,6 +17,29 @@ h1:focus {
     outline-offset: 2px;
 }
 
+/* Links to outside websites (lenders). */
+.external-link {
+    color: var(--mud-palette-primary);
+    text-decoration: none;
+}
+
+.external-link:hover { text-decoration: underline; }
+
+.external-link-icon {
+    display: inline-flex;
+    align-items: center;
+    color: var(--mud-palette-primary);
+    border-radius: 4px;
+    padding: 2px;
+    vertical-align: middle;
+}
+
+.external-link-icon:focus-visible,
+.external-link:focus-visible {
+    outline: 2px solid var(--mud-palette-primary);
+    outline-offset: 2px;
+}
+
 /* Category chips and color picker. */
 .category-chip {
     display: inline-flex;

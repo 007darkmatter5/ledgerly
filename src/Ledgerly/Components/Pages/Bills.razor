@@ -67,6 +67,7 @@
                         @if (context.Loan is not null)
                         {
                             <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Href="@($"loans/{context.Loan.Id}")" Icon="@Icons.Material.Filled.RealEstateAgent">@context.Loan.Name@(context.LoanPaymentKind == LoanPaymentKind.ExtraPrincipal ? " · extra" : "")</MudChip>
+                            <ExternalLink Url="@context.Loan.LenderUrl" IconOnly="true" Title="@($"Open {context.Loan.Lender ?? "lender"} website")" />
                         }
                         @if (!context.IsActive)
                         {

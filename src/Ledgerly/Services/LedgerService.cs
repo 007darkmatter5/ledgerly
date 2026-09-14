@@ -276,7 +276,14 @@ public class LedgerService(IDbContextFactory<LedgerlyDbContext> dbFactory, ICurr
         return await db.Loans.AsNoTracking().SingleOrDefaultAsync(l => l.Id == id && l.LedgerId == ledgerId);
     }
 
-    public Task SaveLoanAsync(Loan loan) => SaveAsync(loan);
+    /// <summary>Saves a loan. Throws <see cref="LedgerValidationException"/> if the lender website isn't a valid web address.</summary>
+    public Task SaveLoanAsync(Loan loan)
+    {
+        if (!WebLinks.TryNormalize(loan.LenderUrl, out var url))
+            throw new LedgerValidationException("Enter the lender's website as a web address, like https://www.mybank.com.");
+        loan.LenderUrl = url;
+        return SaveAsync(loan);
+    }
 
     public Task DeleteLoanAsync(int id) => DeleteAsync<Loan>(id);
 

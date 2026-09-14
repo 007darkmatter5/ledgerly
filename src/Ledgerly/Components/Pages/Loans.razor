@@ -57,7 +57,10 @@
             }
             <MudTd DataLabel="Loan">
                 <MudText Class="@(context.IsActive ? null : "mud-text-disabled")">@context.Name</MudText>
-                <MudText Typo="Typo.caption" Class="mud-text-secondary">@Display.Of(context.Type)@(string.IsNullOrWhiteSpace(context.Lender) ? "" : $" · {context.Lender}")@(context.IsActive ? "" : " · Inactive")</MudText>
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                    @Display.Of(context.Type)@(string.IsNullOrWhiteSpace(context.Lender) ? "" : $" · {context.Lender}")@(context.IsActive ? "" : " · Inactive")
+                    <ExternalLink Url="@context.LenderUrl" IconOnly="true" Title="@($"Open {context.Lender ?? "lender"} website")" />
+                </MudText>
             </MudTd>
             <MudTd DataLabel="Balance" Style="text-align:right">
                 <MudText Typo="Typo.body2">@balance.ToString("C")</MudText>

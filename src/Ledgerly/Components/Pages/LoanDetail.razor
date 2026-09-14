@@ -24,13 +24,33 @@
     <MudStack Spacing="0">
         <MudText Typo="Typo.h4">@_loan.Name</MudText>
         <MudText Typo="Typo.body2" Class="mud-text-secondary">
-            @Display.Of(_loan.Type)@(string.IsNullOrWhiteSpace(_loan.Lender) ? "" : $" · {_loan.Lender}")
+            @Display.Of(_loan.Type)
+            @if (!string.IsNullOrWhiteSpace(_loan.Lender))
+            {
+                <text> · </text>
+                @if (_loan.LenderUrl is not null)
+                {
+                    <ExternalLink Url="@_loan.LenderUrl">@_loan.Lender</ExternalLink>
+                }
+                else
+                {
+                    @_loan.Lender
+                }
+            }
+            else if (_loan.LenderUrl is not null)
+            {
+                <text> · </text><ExternalLink Url="@_loan.LenderUrl" />
+            }
             · @_loan.OriginalPrincipal.ToString("C0") at @_loan.AnnualRatePercent.ToString("0.###")% for @Display.Months(_loan.TermMonths)
             · first payment @Display.Date(_loan.FirstPaymentDate)
         </MudText>
     </MudStack>
     <MudSpacer />
-    <MudStack Row="true" Spacing="2">
+    <MudStack Row="true" Spacing="2" Wrap="Wrap.Wrap">
+        @if (_loan.LenderUrl is not null)
+        {
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.OpenInNew" Href="@_loan.LenderUrl" Target="_blank" Rel="noopener noreferrer">Open lender site</MudButton>
+        }
         <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.AddCard" OnClick="RecordExtraPaymentAsync">Record extra payment</MudButton>
         <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Edit" OnClick="EditAsync">Edit loan</MudButton>
     </MudStack>

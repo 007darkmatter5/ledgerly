@@ -206,6 +206,9 @@ public class Loan : ILedgerEntity
     public int LedgerId { get; set; }
     public string Name { get; set; } = "";
     public string? Lender { get; set; }
+
+    /// <summary>Optional lender website, e.g. its sign-in or payment page. Always http(s); see <c>WebLinks</c>.</summary>
+    public string? LenderUrl { get; set; }
     public LoanType Type { get; set; }
 
     public decimal OriginalPrincipal { get; set; }
