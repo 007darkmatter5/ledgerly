@@ -52,6 +52,16 @@ try {
   const categoryListed = await page.waitForSelector('.mud-table-body >> text=E2E Groceries', { timeout: 5000 }).then(() => true, () => false);
   note(`category added and listed: ${categoryListed}`);
   if (!categoryListed) { note('FAIL: new category did not appear'); failed = true; }
+
+  // Payees: add one with a website and see its link listed.
+  await page.goto(`${base}/payees`);
+  await page.click('text=Add payee');
+  await page.fill('.mud-dialog input >> nth=0', 'E2E Power Co');
+  await page.fill('.mud-dialog input[type=url]', 'power.example.com');
+  await page.click('.mud-dialog button:has-text("Save")');
+  const payeeLink = await page.waitForSelector('.mud-table-body a[href="https://power.example.com/"]', { timeout: 5000 }).then(() => true, () => false);
+  note(`payee added with website link: ${payeeLink}`);
+  if (!payeeLink) { note('FAIL: new payee or its website link did not appear'); failed = true; }
 } catch (e) {
   note(`FAIL: ${e.message}`);
   failed = true;

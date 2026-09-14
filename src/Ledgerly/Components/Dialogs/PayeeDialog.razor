@@ -1,0 +1,53 @@
+@inject LedgerService Ledger
+
+<MudDialog>
+    <DialogContent>
+        <MudStack Spacing="2">
+            <MudTextField @bind-Value="Model.Name" Label="Name" MaxLength="100" Variant="Variant.Outlined" Margin="Margin.Dense" Immediate="true"
+                          Error="@(_nameError is not null)" ErrorText="@_nameError" autofocus />
+            <MudTextField @bind-Value="Model.WebsiteUrl" Label="Website (optional)" MaxLength="@WebLinks.MaxLength" Variant="Variant.Outlined" Margin="Margin.Dense"
+                          InputType="InputType.Url" Placeholder="https://www.example.com" Clearable="true"
+                          Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Link"
+                          HelperText="For example, the sign-in or payment page"
+                          Error="@(_urlError is not null)" ErrorText="@_urlError" />
+            <MudTextField @bind-Value="Model.Notes" Label="Notes (optional)" MaxLength="1000" Lines="3" Variant="Variant.Outlined" Margin="Margin.Dense"
+                          HelperText="Customer service number, account nickname, etc. Avoid full account numbers or passwords." />
+        </MudStack>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => MudDialog.Cancel()">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveAsync" Disabled="_saving">Save</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = null!;
+    [Parameter] public Payee Model { get; set; } = new();
+
+    private string? _nameError;
+    private string? _urlError;
+    private bool _saving;
+
+    private async Task SaveAsync()
+    {
+        _nameError = null;
+        _urlError = WebLinks.TryNormalize(Model.WebsiteUrl, out _) ? null : "Enter a web address, like https://www.example.com";
+        if (_urlError is not null)
+            return;
+
+        _saving = true;
+        try
+        {
+            await Ledger.SavePayeeAsync(Model);
+            MudDialog.Close(DialogResult.Ok(Model.Id));
+        }
+        catch (LedgerValidationException ex)
+        {
+            _nameError = ex.Message;
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+}

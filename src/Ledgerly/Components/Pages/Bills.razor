@@ -34,6 +34,15 @@
             }
             <MudSelectItem T="int?" Value="0">Uncategorized</MudSelectItem>
         </MudSelect>
+        <MudSelect T="int?" @bind-Value="PayeeFilter" Label="Payee" Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:200px"
+                   ToStringFunc="@(id => id switch { null => "All payees", 0 => "No payee", _ => _payees.FirstOrDefault(p => p.Id == id)?.Name ?? "" })">
+            <MudSelectItem T="int?" Value="null">All payees</MudSelectItem>
+            @foreach (var payee in _payees)
+            {
+                <MudSelectItem T="int?" Value="payee.Id">@payee.Name</MudSelectItem>
+            }
+            <MudSelectItem T="int?" Value="0">No payee</MudSelectItem>
+        </MudSelect>
         <MudTextField @bind-Value="_search" Label="Search" Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" Immediate="true" Clearable="true" Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:220px" />
         <MudSwitch @bind-Value="_showInactive" Label="Show inactive" Color="Color.Primary" />
     </MudStack>
@@ -56,10 +65,11 @@
                 <MudTd DataLabel="Bill">
                     <MudText Typo="Typo.body1" Class="@(context.IsActive ? null : "mud-text-disabled")">@context.Name</MudText>
                     <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center">
-                        @if (!string.IsNullOrWhiteSpace(context.Payee))
+                        @if (context.Payee is { } payee)
                         {
-                            <MudText Typo="Typo.caption" Class="mud-text-secondary">@context.Payee</MudText>
+                            <MudText Typo="Typo.caption" Class="mud-text-secondary">@payee.Name</MudText>
                         }
+                        <ExternalLink Url="@PayeeWebsite(context)" IconOnly="true" Title="@($"Open {context.Payee?.Name ?? context.Loan?.Lender?.Name} website")" />
                         @if (context.AutoPay)
                         {
                             <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Info">Autopay</MudChip>
@@ -67,7 +77,6 @@
                         @if (context.Loan is not null)
                         {
                             <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Href="@($"loans/{context.Loan.Id}")" Icon="@Icons.Material.Filled.RealEstateAgent">@context.Loan.Name@(context.LoanPaymentKind == LoanPaymentKind.ExtraPrincipal ? " · extra" : "")</MudChip>
-                            <ExternalLink Url="@context.Loan.LenderUrl" IconOnly="true" Title="@($"Open {context.Loan.Lender ?? "lender"} website")" />
                         }
                         @if (!context.IsActive)
                         {
@@ -152,12 +161,20 @@
     /// <summary>Preselects a category filter, e.g. from the Categories page (0 = uncategorized).</summary>
     [SupplyParameterFromQuery(Name = "category")] private int? CategoryQuery { get; set; }
 
+    /// <summary>Preselects a payee filter, e.g. from the Payees page (0 = no payee).</summary>
+    [SupplyParameterFromQuery(Name = "payee")] private int? PayeeQuery { get; set; }
+
     private bool _loading = true;
     private List<Bill> _bills = [];
     private List<Account> _accounts = [];
     private List<Category> _categories = [];
+    private List<Payee> _payees = [];
     private int? _accountFilter;
     private int? CategoryFilter { get; set; }
+    private int? PayeeFilter { get; set; }
+
+    /// <summary>The bill's payee website, or its loan lender's.</summary>
+    private static string? PayeeWebsite(Bill bill) => bill.Payee?.WebsiteUrl ?? bill.Loan?.Lender?.WebsiteUrl;
     private string? _search;
     private bool _showInactive;
     private int _tab;
@@ -175,9 +192,10 @@
         (_showInactive || b.IsActive)
         && (_accountFilter is null || (b.PayFromAccountId ?? 0) == _accountFilter)
         && (CategoryFilter is null || (b.CategoryId ?? 0) == CategoryFilter)
+        && (PayeeFilter is null || (b.PayeeId ?? 0) == PayeeFilter)
         && (string.IsNullOrWhiteSpace(_search)
             || b.Name.Contains(_search, StringComparison.OrdinalIgnoreCase)
-            || (b.Payee?.Contains(_search, StringComparison.OrdinalIgnoreCase) ?? false)
+            || (b.Payee?.Name.Contains(_search, StringComparison.OrdinalIgnoreCase) ?? false)
             || (b.Category?.Name.Contains(_search, StringComparison.OrdinalIgnoreCase) ?? false)));
 
     private List<BillDue> MonthSchedule => BillSchedule.Between(FilteredBills, _month, _month.AddMonths(1).AddDays(-1)).ToList();
@@ -187,6 +205,7 @@
         _month = ThisMonth;
         _byNextDue = b => NextDue(b) ?? DateOnly.MaxValue;
         CategoryFilter = CategoryQuery;
+        PayeeFilter = PayeeQuery;
         await LoadAsync();
     }
 
@@ -195,6 +214,7 @@
         _bills = await Ledger.GetBillsAsync();
         _accounts = await Ledger.GetAccountsAsync();
         _categories = await Ledger.GetCategoriesAsync();
+        _payees = await Ledger.GetPayeesAsync();
         _loading = false;
     }
 
@@ -207,7 +227,8 @@
         var model = bill?.Copy() ?? new Bill
         {
             PayFromAccountId = _accountFilter is > 0 ? _accountFilter : null,
-            CategoryId = CategoryFilter is > 0 ? CategoryFilter : null
+            CategoryId = CategoryFilter is > 0 ? CategoryFilter : null,
+            PayeeId = PayeeFilter is > 0 ? PayeeFilter : null
         };
         var parameters = new DialogParameters<BillDialog> { { d => d.Model, model } };
         var dialog = await Dialogs.ShowAsync<BillDialog>(bill is null ? "Add bill" : "Edit bill", parameters,

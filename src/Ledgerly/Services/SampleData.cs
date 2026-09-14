@@ -15,21 +15,33 @@ public static class SampleData
         var savings = new Account { Name = "Emergency Savings", Type = AccountType.Savings, Balance = 8000m, BalanceAsOf = today };
         var card = new Account { Name = "Rewards Card", Type = AccountType.CreditCard, Balance = -620m, BalanceAsOf = today };
 
+        Payee NewPayee(string name) => new() { Name = name };
+        var firstStreetBank = NewPayee("First Street Bank");
+        var creditUnion = NewPayee("Credit Union");
+        var loanServicer = NewPayee("Loan Servicer");
+        var cityPower = NewPayee("City Power");
+        var cityWater = NewPayee("City Water");
+        var fiberNet = NewPayee("FiberNet");
+        var mobileCo = NewPayee("Mobile Co");
+        var streamCo = NewPayee("StreamCo");
+        var safeDrive = NewPayee("SafeDrive");
+        var rewardsCard = NewPayee("Rewards Card");
+
         var mortgage = new Loan
         {
-            Name = "Home Mortgage", Lender = "First Street Bank", Type = LoanType.Mortgage,
+            Name = "Home Mortgage", Lender = firstStreetBank, Type = LoanType.Mortgage,
             OriginalPrincipal = 280_000m, AnnualRatePercent = 6.25m, TermMonths = 360,
             FirstPaymentDate = Day(1).AddYears(-3)
         };
         var auto = new Loan
         {
-            Name = "Car Loan", Lender = "Credit Union", Type = LoanType.Auto,
+            Name = "Car Loan", Lender = creditUnion, Type = LoanType.Auto,
             OriginalPrincipal = 28_000m, AnnualRatePercent = 5.9m, TermMonths = 60,
             FirstPaymentDate = Day(15).AddMonths(-14), ExtraPrincipal = 50m
         };
         var student = new Loan
         {
-            Name = "Student Loan", Lender = "Loan Servicer", Type = LoanType.Student,
+            Name = "Student Loan", Lender = loanServicer, Type = LoanType.Student,
             OriginalPrincipal = 32_000m, AnnualRatePercent = 4.5m, TermMonths = 120,
             FirstPaymentDate = Day(20).AddYears(-4)
         };
@@ -48,18 +60,19 @@ public static class SampleData
         [
             checking, savings, card, mortgage, auto, student,
             housing, transportation, education, utilities, entertainment, insurance, debt,
+            firstStreetBank, creditUnion, loanServicer, cityPower, cityWater, fiberNet, mobileCo, streamCo, safeDrive, rewardsCard,
             new Income { Name = "Paycheck", Amount = 2150m, Frequency = Frequency.EveryTwoWeeks, StartDate = NextWeekday(today, DayOfWeek.Friday), DepositToAccount = checking },
 
-            new Bill { Name = "Mortgage", Payee = mortgage.Lender, Category = housing, ExpectedAmount = PaymentOf(mortgage), StartDate = mortgage.FirstPaymentDate, PayFromAccount = checking, Loan = mortgage, AutoPay = true },
-            new Bill { Name = "Car Payment", Payee = auto.Lender, Category = transportation, ExpectedAmount = PaymentOf(auto) + auto.ExtraPrincipal, StartDate = auto.FirstPaymentDate, PayFromAccount = checking, Loan = auto, AutoPay = true },
-            new Bill { Name = "Student Loan", Payee = student.Lender, Category = education, ExpectedAmount = PaymentOf(student), StartDate = student.FirstPaymentDate, PayFromAccount = checking, Loan = student },
-            new Bill { Name = "Electric", Payee = "City Power", Category = utilities, ExpectedAmount = 120m, MaxAmount = 190m, StartDate = Day(12), PayFromAccount = checking },
-            new Bill { Name = "Water & Sewer", Payee = "City Water", Category = utilities, ExpectedAmount = 95m, MaxAmount = 130m, Frequency = Frequency.Quarterly, StartDate = Day(25), PayFromAccount = checking },
-            new Bill { Name = "Internet", Payee = "FiberNet", Category = utilities, ExpectedAmount = 70m, StartDate = Day(8), PayFromAccount = checking, AutoPay = true },
-            new Bill { Name = "Phone", Payee = "Mobile Co", Category = utilities, ExpectedAmount = 85m, StartDate = Day(18), PayFromAccount = card, AutoPay = true },
-            new Bill { Name = "Streaming", Payee = "StreamCo", Category = entertainment, ExpectedAmount = 15.99m, StartDate = Day(3), PayFromAccount = card, AutoPay = true },
-            new Bill { Name = "Car Insurance", Payee = "SafeDrive", Category = insurance, ExpectedAmount = 540m, Frequency = Frequency.SemiAnnually, StartDate = Day(1).AddMonths(1), PayFromAccount = checking },
-            new Bill { Name = "Credit Card Payment", Payee = "Rewards Card", Category = debt, ExpectedAmount = 300m, MaxAmount = 650m, StartDate = Day(22), PayFromAccount = checking }
+            new Bill { Name = "Mortgage", Payee = firstStreetBank, Category = housing, ExpectedAmount = PaymentOf(mortgage), StartDate = mortgage.FirstPaymentDate, PayFromAccount = checking, Loan = mortgage, AutoPay = true },
+            new Bill { Name = "Car Payment", Payee = creditUnion, Category = transportation, ExpectedAmount = PaymentOf(auto) + auto.ExtraPrincipal, StartDate = auto.FirstPaymentDate, PayFromAccount = checking, Loan = auto, AutoPay = true },
+            new Bill { Name = "Student Loan", Payee = loanServicer, Category = education, ExpectedAmount = PaymentOf(student), StartDate = student.FirstPaymentDate, PayFromAccount = checking, Loan = student },
+            new Bill { Name = "Electric", Payee = cityPower, Category = utilities, ExpectedAmount = 120m, MaxAmount = 190m, StartDate = Day(12), PayFromAccount = checking },
+            new Bill { Name = "Water & Sewer", Payee = cityWater, Category = utilities, ExpectedAmount = 95m, MaxAmount = 130m, Frequency = Frequency.Quarterly, StartDate = Day(25), PayFromAccount = checking },
+            new Bill { Name = "Internet", Payee = fiberNet, Category = utilities, ExpectedAmount = 70m, StartDate = Day(8), PayFromAccount = checking, AutoPay = true },
+            new Bill { Name = "Phone", Payee = mobileCo, Category = utilities, ExpectedAmount = 85m, StartDate = Day(18), PayFromAccount = card, AutoPay = true },
+            new Bill { Name = "Streaming", Payee = streamCo, Category = entertainment, ExpectedAmount = 15.99m, StartDate = Day(3), PayFromAccount = card, AutoPay = true },
+            new Bill { Name = "Car Insurance", Payee = safeDrive, Category = insurance, ExpectedAmount = 540m, Frequency = Frequency.SemiAnnually, StartDate = Day(1).AddMonths(1), PayFromAccount = checking },
+            new Bill { Name = "Credit Card Payment", Payee = rewardsCard, Category = debt, ExpectedAmount = 300m, MaxAmount = 650m, StartDate = Day(22), PayFromAccount = checking }
         ];
     }
 

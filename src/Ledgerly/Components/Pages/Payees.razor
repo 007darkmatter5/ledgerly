@@ -1,0 +1,142 @@
+@page "/payees"
+@inject LedgerService Ledger
+@inject IDialogService Dialogs
+@inject ISnackbar Snackbar
+
+<PageTitle>Payees · Ledgerly</PageTitle>
+
+<MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-4" Wrap="Wrap.Wrap">
+    <MudStack Spacing="0">
+        <MudText Typo="Typo.h4">Payees</MudText>
+        <MudText Typo="Typo.body2" Class="mud-text-secondary">The companies and people you pay, including loan lenders. Add a website to get a quick link wherever they appear.</MudText>
+    </MudStack>
+    <MudSpacer />
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="() => EditAsync(null)">Add payee</MudButton>
+</MudStack>
+
+<MudPaper Elevation="1">
+    <MudTable Items="_rows" Hover="true" Loading="_loading" Breakpoint="Breakpoint.Sm" Elevation="0">
+        <HeaderContent>
+            <MudTh>Payee</MudTh>
+            <MudTh>Website</MudTh>
+            <MudTh Style="text-align:right">Bills</MudTh>
+            <MudTh Style="text-align:right">Loans</MudTh>
+            <MudTh Style="text-align:right">Per month</MudTh>
+            <MudTh></MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd DataLabel="Payee">
+                <MudText Typo="Typo.body1">@context.Payee.Name</MudText>
+                @if (!string.IsNullOrWhiteSpace(context.Payee.Notes))
+                {
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary" Style="white-space:pre-line">@context.Payee.Notes</MudText>
+                }
+            </MudTd>
+            <MudTd DataLabel="Website">
+                @if (context.Payee.WebsiteUrl is not null)
+                {
+                    <ExternalLink Url="@context.Payee.WebsiteUrl" />
+                }
+                else
+                {
+                    <MudText Typo="Typo.body2" Class="mud-text-secondary">—</MudText>
+                }
+            </MudTd>
+            <MudTd DataLabel="Bills" Style="text-align:right">
+                @if (context.BillCount > 0)
+                {
+                    <MudLink Href="@($"bills?payee={context.Payee.Id}")">@context.BillCount</MudLink>
+                }
+                else
+                {
+                    <span class="mud-text-secondary">0</span>
+                }
+            </MudTd>
+            <MudTd DataLabel="Loans" Style="text-align:right">
+                @if (context.Loans.Count == 1)
+                {
+                    <MudLink Href="@($"loans/{context.Loans[0].Id}")">1</MudLink>
+                }
+                else if (context.Loans.Count > 1)
+                {
+                    <MudLink Href="loans">@context.Loans.Count</MudLink>
+                }
+                else
+                {
+                    <span class="mud-text-secondary">0</span>
+                }
+            </MudTd>
+            <MudTd DataLabel="Per month" Style="text-align:right">@context.Monthly.ToString("C")</MudTd>
+            <MudTd Style="text-align:right; white-space:nowrap">
+                <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="() => EditAsync(context.Payee)" aria-label="@($"Edit {context.Payee.Name}")" />
+                <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="() => DeleteAsync(context)" aria-label="@($"Delete {context.Payee.Name}")" />
+            </MudTd>
+        </RowTemplate>
+        <NoRecordsContent>
+            <MudText Class="py-6 mud-text-secondary">No payees yet. Add one here, or with the + next to Payee when you add a bill.</MudText>
+        </NoRecordsContent>
+    </MudTable>
+</MudPaper>
+@if (_billsWithoutPayee > 0)
+{
+    <MudText Typo="Typo.caption" Class="mud-text-secondary mt-2 d-block">
+        @_billsWithoutPayee bill@(_billsWithoutPayee == 1 ? " has" : "s have") no payee. <MudLink Href="bills?payee=0" Typo="Typo.caption">Show them</MudLink>
+    </MudText>
+}
+
+@code {
+    private record Row(Payee Payee, int BillCount, List<Loan> Loans, decimal Monthly);
+
+    private bool _loading = true;
+    private List<Row> _rows = [];
+    private int _billsWithoutPayee;
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        var payees = await Ledger.GetPayeesAsync();
+        var bills = await Ledger.GetBillsAsync();
+        var loans = await Ledger.GetLoansAsync();
+
+        _rows = payees.Select(p =>
+        {
+            var payeeBills = bills.Where(b => b.PayeeId == p.Id).ToList();
+            return new Row(p, payeeBills.Count, loans.Where(l => l.LenderId == p.Id).ToList(),
+                payeeBills.Where(b => b.IsActive).Sum(b => Recurrence.MonthlyEquivalent(b.Frequency, b.ExpectedAmount)));
+        }).ToList();
+        _billsWithoutPayee = bills.Count(b => b.PayeeId is null);
+        _loading = false;
+    }
+
+    private async Task EditAsync(Payee? payee)
+    {
+        var parameters = new DialogParameters<PayeeDialog> { { d => d.Model, payee?.Copy() ?? new Payee() } };
+        var dialog = await Dialogs.ShowAsync<PayeeDialog>(payee is null ? "Add payee" : "Edit payee", parameters,
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true });
+        if (await dialog.Result is { Canceled: false })
+        {
+            Snackbar.Add(payee is null ? "Payee added" : "Payee saved", Severity.Success);
+            await LoadAsync();
+        }
+    }
+
+    private async Task DeleteAsync(Row row)
+    {
+        var uses = new List<string>();
+        if (row.BillCount > 0) uses.Add($"{row.BillCount} bill{(row.BillCount == 1 ? "" : "s")}");
+        if (row.Loans.Count > 0) uses.Add($"{row.Loans.Count} loan{(row.Loans.Count == 1 ? "" : "s")}");
+
+        var confirmed = await Dialogs.ShowMessageBoxAsync("Delete payee?",
+            uses.Count == 0
+                ? $"Delete \"{row.Payee.Name}\"?"
+                : $"Delete \"{row.Payee.Name}\"? Its {string.Join(" and ", uses)} will be kept, without a payee.",
+            yesText: "Delete", cancelText: "Cancel");
+        if (confirmed != true)
+            return;
+
+        await Ledger.DeletePayeeAsync(row.Payee.Id);
+        Snackbar.Add("Payee deleted", Severity.Info);
+        await LoadAsync();
+    }
+}

@@ -25,21 +25,17 @@
         <MudText Typo="Typo.h4">@_loan.Name</MudText>
         <MudText Typo="Typo.body2" Class="mud-text-secondary">
             @Display.Of(_loan.Type)
-            @if (!string.IsNullOrWhiteSpace(_loan.Lender))
+            @if (_loan.Lender is { } lender)
             {
                 <text> · </text>
-                @if (_loan.LenderUrl is not null)
+                @if (lender.WebsiteUrl is not null)
                 {
-                    <ExternalLink Url="@_loan.LenderUrl">@_loan.Lender</ExternalLink>
+                    <ExternalLink Url="@lender.WebsiteUrl">@lender.Name</ExternalLink>
                 }
                 else
                 {
-                    @_loan.Lender
+                    @lender.Name
                 }
-            }
-            else if (_loan.LenderUrl is not null)
-            {
-                <text> · </text><ExternalLink Url="@_loan.LenderUrl" />
             }
             · @_loan.OriginalPrincipal.ToString("C0") at @_loan.AnnualRatePercent.ToString("0.###")% for @Display.Months(_loan.TermMonths)
             · first payment @Display.Date(_loan.FirstPaymentDate)
@@ -47,9 +43,9 @@
     </MudStack>
     <MudSpacer />
     <MudStack Row="true" Spacing="2" Wrap="Wrap.Wrap">
-        @if (_loan.LenderUrl is not null)
+        @if (_loan.Lender?.WebsiteUrl is { } lenderSite)
         {
-            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.OpenInNew" Href="@_loan.LenderUrl" Target="_blank" Rel="noopener noreferrer">Open lender site</MudButton>
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.OpenInNew" Href="@lenderSite" Target="_blank" Rel="noopener noreferrer">Open lender site</MudButton>
         }
         <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.AddCard" OnClick="RecordExtraPaymentAsync">Record extra payment</MudButton>
         <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Edit" OnClick="EditAsync">Edit loan</MudButton>
@@ -339,7 +335,7 @@ else
             ? new Bill
             {
                 Name = _loan!.Name,
-                Payee = _loan.Lender,
+                PayeeId = _loan.LenderId,
                 CategoryId = categoryId,
                 LoanId = _loan.Id,
                 ExpectedAmount = MonthlyAmount,
@@ -349,7 +345,7 @@ else
             : new Bill
             {
                 Name = $"{_loan!.Name} extra payment",
-                Payee = _loan.Lender,
+                PayeeId = _loan.LenderId,
                 CategoryId = categoryId,
                 LoanId = _loan.Id,
                 LoanPaymentKind = LoanPaymentKind.ExtraPrincipal,

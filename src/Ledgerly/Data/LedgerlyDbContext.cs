@@ -7,6 +7,7 @@ public class LedgerlyDbContext(DbContextOptions<LedgerlyDbContext> options) : Id
 {
     public DbSet<Ledger> Ledgers => Set<Ledger>();
     public DbSet<Category> Categories => Set<Category>();
+    public DbSet<Payee> Payees => Set<Payee>();
     public DbSet<Account> Accounts => Set<Account>();
     public DbSet<Bill> Bills => Set<Bill>();
     public DbSet<BillOccurrence> BillOccurrences => Set<BillOccurrence>();
@@ -42,6 +43,15 @@ public class LedgerlyDbContext(DbContextOptions<LedgerlyDbContext> options) : Id
             e.HasOne<Ledger>().WithMany().HasForeignKey(c => c.LedgerId).OnDelete(DeleteBehavior.Cascade);
         });
 
+        modelBuilder.Entity<Payee>(e =>
+        {
+            e.Property(p => p.Name).HasMaxLength(100).UseCollation("NOCASE");
+            e.Property(p => p.WebsiteUrl).HasMaxLength(WebLinks.MaxLength);
+            e.Property(p => p.Notes).HasMaxLength(1000);
+            e.HasIndex(p => new { p.LedgerId, p.Name }).IsUnique();
+            e.HasOne<Ledger>().WithMany().HasForeignKey(p => p.LedgerId).OnDelete(DeleteBehavior.Cascade);
+        });
+
         modelBuilder.Entity<Account>(e =>
         {
             e.Property(a => a.Name).HasMaxLength(100);
@@ -57,6 +67,7 @@ public class LedgerlyDbContext(DbContextOptions<LedgerlyDbContext> options) : Id
             e.HasOne<Ledger>().WithMany().HasForeignKey(b => b.LedgerId).OnDelete(DeleteBehavior.Cascade);
             e.HasOne(b => b.PayFromAccount).WithMany().OnDelete(DeleteBehavior.SetNull);
             e.HasOne(b => b.Category).WithMany().OnDelete(DeleteBehavior.SetNull);
+            e.HasOne(b => b.Payee).WithMany().OnDelete(DeleteBehavior.SetNull);
             e.HasOne(b => b.Loan).WithMany().OnDelete(DeleteBehavior.SetNull);
             e.HasMany(b => b.Occurrences).WithOne(o => o.Bill).OnDelete(DeleteBehavior.Cascade);
         });
@@ -78,9 +89,9 @@ public class LedgerlyDbContext(DbContextOptions<LedgerlyDbContext> options) : Id
         modelBuilder.Entity<Loan>(e =>
         {
             e.Property(l => l.Name).HasMaxLength(100);
-            e.Property(l => l.LenderUrl).HasMaxLength(WebLinks.MaxLength);
             e.Property(l => l.Type).HasConversion<string>().HasMaxLength(20);
             e.HasOne<Ledger>().WithMany().HasForeignKey(l => l.LedgerId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(l => l.Lender).WithMany().HasForeignKey(l => l.LenderId).OnDelete(DeleteBehavior.SetNull);
         });
     }
 }

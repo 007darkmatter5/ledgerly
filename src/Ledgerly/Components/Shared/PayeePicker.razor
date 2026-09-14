@@ -1,0 +1,41 @@
+@* Choose a payee, or add a new one without leaving the form. *@
+@inject LedgerService Ledger
+@inject IDialogService Dialogs
+
+<MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center">
+    <MudSelect T="int?" Value="Value" ValueChanged="OnValueChanged" Label="@Label" Variant="Variant.Outlined" Margin="Margin.Dense"
+               ToStringFunc="@(id => _payees.FirstOrDefault(p => p.Id == id)?.Name ?? "None")" HelperText="@HelperText">
+        <MudSelectItem T="int?" Value="null">None</MudSelectItem>
+        @foreach (var payee in _payees)
+        {
+            <MudSelectItem T="int?" Value="payee.Id">@payee.Name</MudSelectItem>
+        }
+    </MudSelect>
+    <MudTooltip Text="@($"New {Label.ToLowerInvariant()}")">
+        <MudIconButton Icon="@Icons.Material.Filled.Add" Size="Size.Small" OnClick="AddAsync" aria-label="@($"New {Label.ToLowerInvariant()}")" />
+    </MudTooltip>
+</MudStack>
+
+@code {
+    [Parameter] public int? Value { get; set; }
+    [Parameter] public EventCallback<int?> ValueChanged { get; set; }
+    [Parameter] public string Label { get; set; } = "Payee";
+    [Parameter] public string? HelperText { get; set; }
+
+    private List<Payee> _payees = [];
+
+    protected override async Task OnInitializedAsync() => _payees = await Ledger.GetPayeesAsync();
+
+    private Task OnValueChanged(int? id) => ValueChanged.InvokeAsync(id);
+
+    private async Task AddAsync()
+    {
+        var parameters = new DialogParameters<PayeeDialog> { { d => d.Model, new Payee() } };
+        var dialog = await Dialogs.ShowAsync<PayeeDialog>($"New {Label.ToLowerInvariant()}", parameters, new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true });
+        if (await dialog.Result is { Canceled: false, Data: int id })
+        {
+            _payees = await Ledger.GetPayeesAsync();
+            await OnValueChanged(id);
+        }
+    }
+}

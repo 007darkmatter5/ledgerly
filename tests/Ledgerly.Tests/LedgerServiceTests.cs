@@ -113,20 +113,83 @@ public sealed class LedgerServiceTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Lender_website_is_normalized_and_unsafe_links_are_rejected()
+    public async Task Payee_website_is_normalized_and_unsafe_links_are_rejected()
     {
         var alice = ServiceFor("alice");
-        var loan = new Loan { Name = "Car", OriginalPrincipal = 20_000m, AnnualRatePercent = 5m, TermMonths = 60, FirstPaymentDate = new DateOnly(2026, 1, 15), LenderUrl = "mycreditunion.org/pay" };
-        await alice.SaveLoanAsync(loan);
-        Assert.Equal("https://mycreditunion.org/pay", (await alice.GetLoanAsync(loan.Id))!.LenderUrl);
+        var payee = new Payee { Name = " My Credit Union ", WebsiteUrl = "mycreditunion.org/pay", Notes = "  Member services 555-0100 " };
+        await alice.SavePayeeAsync(payee);
 
-        loan.LenderUrl = "javascript:alert(document.cookie)";
-        await Assert.ThrowsAsync<LedgerValidationException>(() => alice.SaveLoanAsync(loan));
-        Assert.Equal("https://mycreditunion.org/pay", (await alice.GetLoanAsync(loan.Id))!.LenderUrl);
+        var saved = Assert.Single(await alice.GetPayeesAsync());
+        Assert.Equal("My Credit Union", saved.Name);
+        Assert.Equal("https://mycreditunion.org/pay", saved.WebsiteUrl);
+        Assert.Equal("Member services 555-0100", saved.Notes);
 
-        loan.LenderUrl = "  ";
+        payee.WebsiteUrl = "javascript:alert(document.cookie)";
+        await Assert.ThrowsAsync<LedgerValidationException>(() => alice.SavePayeeAsync(payee));
+        Assert.Equal("https://mycreditunion.org/pay", Assert.Single(await alice.GetPayeesAsync()).WebsiteUrl);
+
+        payee.WebsiteUrl = "  ";
+        await alice.SavePayeeAsync(payee);
+        Assert.Null(Assert.Single(await alice.GetPayeesAsync()).WebsiteUrl);
+    }
+
+    [Fact]
+    public async Task Payees_are_private_and_unique_per_ledger()
+    {
+        var alice = ServiceFor("alice");
+        var bank = new Payee { Name = "First Bank" };
+        await alice.SavePayeeAsync(bank);
+        await Assert.ThrowsAsync<LedgerValidationException>(() => alice.SavePayeeAsync(new Payee { Name = "first bank" }));
+        await Assert.ThrowsAsync<LedgerValidationException>(() => alice.SavePayeeAsync(new Payee { Name = " " }));
+
+        var bob = ServiceFor("bob");
+        await bob.SavePayeeAsync(new Payee { Name = "First Bank" });
+        Assert.Single(await bob.GetPayeesAsync());
+
+        var hijack = bank.Copy();
+        hijack.Name = "Hijacked";
+        hijack.WebsiteUrl = "https://evil.example.com";
+        await Assert.ThrowsAsync<InvalidOperationException>(() => bob.SavePayeeAsync(hijack));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => bob.SaveBillAsync(
+            new Bill { Name = "Sneaky", ExpectedAmount = 1m, StartDate = new DateOnly(2026, 9, 1), PayeeId = bank.Id }));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => bob.SaveLoanAsync(
+            new Loan { Name = "Sneaky", OriginalPrincipal = 1m, TermMonths = 12, FirstPaymentDate = new DateOnly(2026, 9, 1), LenderId = bank.Id }));
+        Assert.Null(Assert.Single(await ServiceFor("alice").GetPayeesAsync()).WebsiteUrl);
+    }
+
+    [Fact]
+    public async Task Deleting_a_payee_keeps_its_bills_and_loans()
+    {
+        var alice = ServiceFor("alice");
+        var bank = new Payee { Name = "First Bank", WebsiteUrl = "https://firstbank.example.com" };
+        await alice.SavePayeeAsync(bank);
+        var loan = new Loan { Name = "Car", OriginalPrincipal = 20_000m, AnnualRatePercent = 5m, TermMonths = 60, FirstPaymentDate = new DateOnly(2026, 1, 15), LenderId = bank.Id };
         await alice.SaveLoanAsync(loan);
-        Assert.Null((await alice.GetLoanAsync(loan.Id))!.LenderUrl);
+        await alice.SaveBillAsync(new Bill { Name = "Car payment", ExpectedAmount = 377.42m, StartDate = new DateOnly(2026, 1, 15), LoanId = loan.Id, PayeeId = bank.Id });
+
+        Assert.Equal("https://firstbank.example.com/", (await alice.GetLoanAsync(loan.Id))!.Lender?.WebsiteUrl);
+        var bill = Assert.Single(await alice.GetBillsAsync());
+        Assert.Equal("First Bank", bill.Payee?.Name);
+        Assert.Equal("First Bank", bill.Loan?.Lender?.Name);
+
+        await alice.DeletePayeeAsync(bank.Id);
+
+        Assert.Null((await alice.GetLoanAsync(loan.Id))!.LenderId);
+        Assert.Null(Assert.Single(await alice.GetBillsAsync()).PayeeId);
+    }
+
+    [Fact]
+    public async Task Extra_loan_payment_bill_uses_the_lender_as_payee()
+    {
+        var alice = ServiceFor("alice");
+        var bank = new Payee { Name = "First Bank" };
+        await alice.SavePayeeAsync(bank);
+        var loan = new Loan { Name = "Car", OriginalPrincipal = 20_000m, AnnualRatePercent = 5m, TermMonths = 60, FirstPaymentDate = new DateOnly(2026, 1, 15), LenderId = bank.Id };
+        await alice.SaveLoanAsync(loan);
+
+        await alice.RecordExtraLoanPaymentAsync(loan.Id, null, 500m, new DateOnly(2026, 9, 1), null);
+
+        Assert.Equal(bank.Id, Assert.Single(await alice.GetBillsAsync()).PayeeId);
     }
 
     [Fact]
@@ -191,6 +254,10 @@ public sealed class LedgerServiceTests : IAsyncLifetime
         var categories = await sample.GetCategoriesAsync();
         Assert.Contains(categories, c => c.Name == "Utilities");
         Assert.All(await sample.GetBillsAsync(), b => Assert.Contains(categories, c => c.Id == b.CategoryId));
+
+        var payees = await sample.GetPayeesAsync();
+        Assert.All(await sample.GetBillsAsync(), b => Assert.Contains(payees, p => p.Id == b.PayeeId));
+        Assert.All(await sample.GetLoansAsync(), l => Assert.Contains(payees, p => p.Id == l.LenderId));
     }
 
     [Fact]

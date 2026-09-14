@@ -141,6 +141,49 @@ public class LedgerService(IDbContextFactory<LedgerlyDbContext> dbFactory, ICurr
     /// <summary>Deletes a category. Its bills are kept and become uncategorized.</summary>
     public Task DeleteCategoryAsync(int id) => DeleteAsync<Category>(id);
 
+    // Payees
+
+    public async Task<List<Payee>> GetPayeesAsync()
+    {
+        var ledgerId = await LedgerIdAsync();
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var payees = await db.Payees.AsNoTracking().Where(p => p.LedgerId == ledgerId).ToListAsync();
+        return payees.OrderBy(p => p.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
+    }
+
+    /// <summary>
+    /// Adds or updates a payee. Throws <see cref="LedgerValidationException"/> for a blank or duplicate
+    /// name, or a website that isn't a valid http(s) address. The website is stored normalized.
+    /// </summary>
+    public async Task SavePayeeAsync(Payee payee)
+    {
+        payee.Name = payee.Name.Trim();
+        if (payee.Name.Length == 0)
+            throw new LedgerValidationException("Enter a payee name.");
+        if (payee.Name.Length > 100)
+            throw new LedgerValidationException("Payee names can be up to 100 characters.");
+        if (!WebLinks.TryNormalize(payee.WebsiteUrl, out var url))
+            throw new LedgerValidationException("Enter the website as a web address, like https://www.mybank.com.");
+        payee.WebsiteUrl = url;
+        payee.Notes = string.IsNullOrWhiteSpace(payee.Notes) ? null : payee.Notes.Trim();
+
+        var ledgerId = await LedgerIdAsync();
+        await using (var db = await dbFactory.CreateDbContextAsync())
+        {
+            var names = await db.Payees.AsNoTracking()
+                .Where(p => p.LedgerId == ledgerId && p.Id != payee.Id)
+                .Select(p => p.Name)
+                .ToListAsync();
+            if (names.Contains(payee.Name, StringComparer.OrdinalIgnoreCase))
+                throw new LedgerValidationException($"There's already a payee called \"{payee.Name}\".");
+        }
+
+        await SaveAsync(payee);
+    }
+
+    /// <summary>Deletes a payee. Its bills and loans are kept, without a payee or lender.</summary>
+    public Task DeletePayeeAsync(int id) => DeleteAsync<Payee>(id);
+
     // Bills
 
     public async Task<List<Bill>> GetBillsAsync()
@@ -150,7 +193,8 @@ public class LedgerService(IDbContextFactory<LedgerlyDbContext> dbFactory, ICurr
         var bills = await db.Bills.AsNoTracking()
             .Where(b => b.LedgerId == ledgerId)
             .Include(b => b.PayFromAccount)
-            .Include(b => b.Loan)
+            .Include(b => b.Loan).ThenInclude(l => l!.Lender)
+            .Include(b => b.Payee)
             .Include(b => b.Category)
             .Include(b => b.Occurrences)
             .ToListAsync();
@@ -165,6 +209,7 @@ public class LedgerService(IDbContextFactory<LedgerlyDbContext> dbFactory, ICurr
             await EnsureInLedgerAsync(db.Accounts, bill.PayFromAccountId, ledgerId);
             await EnsureInLedgerAsync(db.Loans, bill.LoanId, ledgerId);
             await EnsureInLedgerAsync(db.Categories, bill.CategoryId, ledgerId);
+            await EnsureInLedgerAsync(db.Payees, bill.PayeeId, ledgerId);
         }
         await SaveAsync(bill);
     }
@@ -223,7 +268,7 @@ public class LedgerService(IDbContextFactory<LedgerlyDbContext> dbFactory, ICurr
         {
             LedgerId = ledgerId,
             Name = $"{loan.Name} extra payment",
-            Payee = loan.Lender,
+            PayeeId = loan.LenderId,
             CategoryId = categoryId,
             LoanId = loanId,
             LoanPaymentKind = LoanPaymentKind.ExtraPrincipal,
@@ -265,7 +310,7 @@ public class LedgerService(IDbContextFactory<LedgerlyDbContext> dbFactory, ICurr
     {
         var ledgerId = await LedgerIdAsync();
         await using var db = await dbFactory.CreateDbContextAsync();
-        var loans = await db.Loans.AsNoTracking().Where(l => l.LedgerId == ledgerId).ToListAsync();
+        var loans = await db.Loans.AsNoTracking().Where(l => l.LedgerId == ledgerId).Include(l => l.Lender).ToListAsync();
         return loans.OrderBy(l => l.Name).ToList();
     }
 
@@ -273,16 +318,15 @@ public class LedgerService(IDbContextFactory<LedgerlyDbContext> dbFactory, ICurr
     {
         var ledgerId = await LedgerIdAsync();
         await using var db = await dbFactory.CreateDbContextAsync();
-        return await db.Loans.AsNoTracking().SingleOrDefaultAsync(l => l.Id == id && l.LedgerId == ledgerId);
+        return await db.Loans.AsNoTracking().Include(l => l.Lender).SingleOrDefaultAsync(l => l.Id == id && l.LedgerId == ledgerId);
     }
 
-    /// <summary>Saves a loan. Throws <see cref="LedgerValidationException"/> if the lender website isn't a valid web address.</summary>
-    public Task SaveLoanAsync(Loan loan)
+    public async Task SaveLoanAsync(Loan loan)
     {
-        if (!WebLinks.TryNormalize(loan.LenderUrl, out var url))
-            throw new LedgerValidationException("Enter the lender's website as a web address, like https://www.mybank.com.");
-        loan.LenderUrl = url;
-        return SaveAsync(loan);
+        var ledgerId = await LedgerIdAsync();
+        await using (var db = await dbFactory.CreateDbContextAsync())
+            await EnsureInLedgerAsync(db.Payees, loan.LenderId, ledgerId);
+        await SaveAsync(loan);
     }
 
     public Task DeleteLoanAsync(int id) => DeleteAsync<Loan>(id);

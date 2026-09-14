@@ -19,14 +19,19 @@
             <MudText Typo="Typo.caption" Class="mud-text-secondary">@Display.Relative(context.DueDate, Ledger.Today)</MudText>
         </MudTd>
         <MudTd DataLabel="Bill">
-            <MudText Typo="Typo.body2">@context.Bill.Name</MudText>
+            @{
+                var payee = context.Bill.Payee ?? context.Bill.Loan?.Lender;
+            }
+            <MudText Typo="Typo.body2">
+                @context.Bill.Name
+                <ExternalLink Url="@payee?.WebsiteUrl" IconOnly="true" Title="@($"Pay on the {payee?.Name} website")" />
+            </MudText>
             @if (context.Bill.Loan is { } loan)
             {
                 var kind = LoanPayments.KindOf(context.Bill, context.Occurrence);
                 var extra = LoanPayments.ExtraPortion(context.Bill, kind, context.Amount);
                 <MudText Typo="Typo.caption" Class="@(extra > 0 ? "mud-success-text" : "mud-text-secondary")">
                     @loan.Name · @(kind == LoanPaymentKind.ExtraPrincipal ? "extra to principal" : extra > 0 ? $"monthly payment + {extra:C} extra" : "monthly payment")
-                    <ExternalLink Url="@loan.LenderUrl" IconOnly="true" Title="@($"Pay on {loan.Lender ?? "the lender's"} website")" />
                 </MudText>
             }
             @if (!string.IsNullOrWhiteSpace(context.Occurrence?.Notes))

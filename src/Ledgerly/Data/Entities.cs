@@ -68,6 +68,23 @@ public interface ILedgerEntity
     int LedgerId { get; set; }
 }
 
+/// <summary>A company or person that bills are paid to, or that lends money for a loan.</summary>
+public class Payee : ILedgerEntity
+{
+    public Payee Copy() => (Payee)MemberwiseClone();
+
+    public int Id { get; set; }
+    public int LedgerId { get; set; }
+
+    /// <summary>Unique within a ledger, ignoring case.</summary>
+    public string Name { get; set; } = "";
+
+    /// <summary>Optional website, e.g. the sign-in or payment page. Always http(s); see <see cref="WebLinks"/>.</summary>
+    public string? WebsiteUrl { get; set; }
+
+    public string? Notes { get; set; }
+}
+
 /// <summary>A user-defined group for bills, like "Utilities" or "Housing".</summary>
 public class Category : ILedgerEntity
 {
@@ -116,7 +133,8 @@ public class Bill : ILedgerEntity
     public int Id { get; set; }
     public int LedgerId { get; set; }
     public string Name { get; set; } = "";
-    public string? Payee { get; set; }
+    public int? PayeeId { get; set; }
+    public Payee? Payee { get; set; }
     public int? CategoryId { get; set; }
     public Category? Category { get; set; }
 
@@ -205,10 +223,11 @@ public class Loan : ILedgerEntity
     public int Id { get; set; }
     public int LedgerId { get; set; }
     public string Name { get; set; } = "";
-    public string? Lender { get; set; }
 
-    /// <summary>Optional lender website, e.g. its sign-in or payment page. Always http(s); see <c>WebLinks</c>.</summary>
-    public string? LenderUrl { get; set; }
+    /// <summary>The lender, one of the ledger's payees (its website is the lender's site).</summary>
+    public int? LenderId { get; set; }
+    public Payee? Lender { get; set; }
+
     public LoanType Type { get; set; }
 
     public decimal OriginalPrincipal { get; set; }

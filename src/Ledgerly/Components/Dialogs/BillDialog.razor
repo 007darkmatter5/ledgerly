@@ -9,7 +9,7 @@
                     <MudTextField @bind-Value="Model.Name" Label="Bill name" Required="true" RequiredError="Name is required" MaxLength="100" Variant="Variant.Outlined" Margin="Margin.Dense" />
                 </MudItem>
                 <MudItem xs="12" sm="3">
-                    <MudTextField @bind-Value="Model.Payee" Label="Payee" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                    <PayeePicker @bind-Value="Model.PayeeId" />
                 </MudItem>
                 <MudItem xs="12" sm="3">
                     <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center">
@@ -156,7 +156,7 @@
             return;
 
         // Prefill from the loan when the bill is still blank.
-        Model.Payee ??= loan.Lender;
+        Model.PayeeId ??= loan.LenderId;
         if (Model.LoanPaymentKind == LoanPaymentKind.ExtraPrincipal)
         {
             if (string.IsNullOrWhiteSpace(Model.Name))
