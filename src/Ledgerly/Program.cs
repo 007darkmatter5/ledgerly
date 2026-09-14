@@ -1,3 +1,4 @@
+using System.Globalization;
 using Ledgerly.Components;
 using Ledgerly.Components.Account;
 using Ledgerly.Data;
@@ -7,11 +8,18 @@ using Ledgerly.Services.Settings;
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Localization;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using MudBlazor.Services;
 
 var builder = WebApplication.CreateBuilder(args);
+
+// Money and dates are formatted with one fixed culture. Containers usually have no LANG set, which would
+// otherwise fall back to the invariant culture and show amounts as "¤1,234.00".
+var culture = CultureInfo.GetCultureInfo(builder.Configuration["Ledgerly:Culture"] is { Length: > 0 } cultureName ? cultureName : "en-US");
+CultureInfo.DefaultThreadCurrentCulture = culture;
+CultureInfo.DefaultThreadCurrentUICulture = culture;
 
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
@@ -98,6 +106,16 @@ if (!app.Environment.IsDevelopment())
 }
 app.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages: true);
 app.UseHttpsRedirection();
+
+// Every request (and so every interactive circuit) uses the configured culture, whatever the browser sends.
+var localization = new RequestLocalizationOptions
+{
+    DefaultRequestCulture = new RequestCulture(culture),
+    SupportedCultures = [culture],
+    SupportedUICultures = [culture]
+};
+localization.RequestCultureProviders.Clear();
+app.UseRequestLocalization(localization);
 
 app.UseAntiforgery();
 

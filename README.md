@@ -32,6 +32,21 @@ Your own settings go in `/opt/ledgerly/<channel>/ledgerly.env` (for example `ASP
 
 **Rolling back:** run the script with `--version <previous version>` (listed on the [Releases](https://github.com/007darkmatter5/ledgerly/releases) page and in the backup folder names). If the newer version already upgraded the database, stop the container and copy the matching backup back into `data/` first.
 
+### Unraid
+
+Use [`deploy/unraid/docker-compose.yml`](deploy/unraid/docker-compose.yml) with the **Docker Compose Manager** plugin (install it from Apps):
+
+1. **Docker** tab → **Compose** section → **Add New Stack**, name it `ledgerly-beta`.
+2. On the stack's gear icon, choose **Edit Stack → Compose File**, paste the file's contents and save.
+3. Click **Compose Up**. Open `http://<unraid-ip>:5006` and create the first account (it becomes the admin).
+
+It stores everything in `/mnt/user/appdata/ledgerly-beta` (`data/` for the database, `keys/` for encryption keys), runs as `nobody:users` (99:100) like other Unraid containers, and uses the server's time zone. A small one-shot `ledgerly-beta-init` container fixes folder permissions on each start; it shows as stopped, which is expected.
+
+- **Update to the newest beta:** on the stack, **Update Stack** (pulls `:beta` and recreates the container). Database changes run automatically on start.
+- **Back up before updating:** Ledgerly doesn't make its own backup here. Use the **Appdata Backup** plugin (it stops containers for a consistent copy), or stop the stack and copy `/mnt/user/appdata/ledgerly-beta`.
+- **Production on Unraid:** copy the file, then replace every `ledgerly-beta` with `ledgerly`, `:beta` with `:production`, `Beta` with `Production`, and port `5006` with `5005`. Keep the two appdata folders separate.
+- **Pin a version:** replace `:beta` with a specific tag from the [Releases](https://github.com/007darkmatter5/ledgerly/releases) page, e.g. `:1.0.12-beta`.
+
 ### Release workflow
 
 1. Commit changes to the `beta` branch and push. GitHub Actions runs the tests, publishes the Beta image and creates a pre-release (e.g. `v1.0.12-beta`).

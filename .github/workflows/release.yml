@@ -59,6 +59,37 @@ jobs:
 
       - uses: docker/setup-buildx-action@v4
 
+      - name: Build image for smoke test
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          tags: ledgerly:smoke
+          build-args: |
+            VERSION=${{ steps.meta.outputs.version }}
+            CHANNEL=${{ steps.meta.outputs.channel }}
+          cache-from: type=gha,scope=${{ github.ref_name }}
+
+      # Start the real image the way Unraid runs it (UID 99:100, bind-mounted folders) and make sure it comes up.
+      - name: Smoke test
+        run: |
+          mkdir -p smoke/data smoke/keys
+          sudo chown -R 99:100 smoke
+          docker run -d --name smoke --user 99:100 -e HOME=/tmp -p 8080:8080 \
+            -v "$PWD/smoke/data:/data" -v "$PWD/smoke/keys:/keys" ledgerly:smoke
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:8080/healthz; then echo; break; fi
+            sleep 1
+          done
+          docker logs smoke
+          curl -fsS http://localhost:8080/healthz
+          curl -fsS http://localhost:8080/Account/Login | grep -q "Sign in"
+          sudo test -f smoke/data/ledgerly.db
+          sudo sh -c 'ls smoke/keys/key-*.xml'
+          if docker logs smoke 2>&1 | grep -E "^(fail|crit):"; then echo "Errors in startup logs"; exit 1; fi
+          docker rm -f smoke
+
       - uses: docker/login-action@v4
         with:
           registry: ghcr.io

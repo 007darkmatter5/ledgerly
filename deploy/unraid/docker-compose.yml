@@ -1,0 +1,50 @@
+# Ledgerly Beta on Unraid
+#
+# For the Docker Compose Manager plugin (Apps > "Docker Compose Manager"):
+#   Docker tab > Compose > Add New Stack > name it "ledgerly-beta" > Edit Stack > Compose File > paste this file > Save
+#   then Compose Up.
+#
+# Open http://<your-unraid-ip>:5006 and create the first account (it becomes the admin).
+# To update to the newest beta: Update Stack (pulls the image and recreates the container).
+#
+# Data lives in /mnt/user/appdata/ledgerly-beta:
+#   data/  the SQLite database (ledgerly.db)
+#   keys/  encryption keys for sign-in cookies and the saved email password. Keep them with the data.
+
+name: ledgerly-beta
+
+services:
+  # Runs once before Ledgerly starts: creates the appdata folders and gives them to nobody:users (99:100),
+  # the owner Unraid uses for appdata, so Ledgerly can write its database and keys.
+  ledgerly-beta-init:
+    image: busybox:1.37
+    container_name: ledgerly-beta-init
+    command: ["sh", "-c", "chown -R 99:100 /data /keys && chmod 700 /keys"]
+    volumes:
+      - /mnt/user/appdata/ledgerly-beta/data:/data
+      - /mnt/user/appdata/ledgerly-beta/keys:/keys
+    restart: "no"
+
+  ledgerly-beta:
+    image: ghcr.io/007darkmatter5/ledgerly:beta
+    container_name: ledgerly-beta
+    depends_on:
+      ledgerly-beta-init:
+        condition: service_completed_successfully
+    user: "99:100"
+    restart: unless-stopped
+    ports:
+      - "5006:8080"                      # change the left number if 5006 is taken
+    environment:
+      Ledgerly__Channel: Beta
+      HOME: /tmp
+      # TZ: America/Chicago              # only if the /etc/localtime mount below doesn't give the right time zone
+      # Ledgerly__Culture: en-US          # money/date format (default en-US)
+      # ASPNETCORE_FORWARDEDHEADERS_ENABLED: "true"   # behind a reverse proxy (SWAG, Nginx Proxy Manager, Traefik) that handles HTTPS
+    volumes:
+      - /mnt/user/appdata/ledgerly-beta/data:/data
+      - /mnt/user/appdata/ledgerly-beta/keys:/keys
+      - /etc/localtime:/etc/localtime:ro  # use the server's time zone so "today" and due dates are right
+    labels:
+      # WebUI link in the Docker tab ([PORT:8080] is the container port; Unraid shows the matching host port).
+      net.unraid.docker.webui: "http://[IP]:[PORT:8080]/"

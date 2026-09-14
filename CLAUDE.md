@@ -27,6 +27,8 @@ dotnet ef migrations add <Name> --project src/Ledgerly --output-dir Data/Migrati
 - The `Dockerfile` cross-publishes with `$BUILDPLATFORM`/`-a $TARGETARCH` so arm64 builds need no emulation; keep `RUN` out of the final stage for the same reason. The container runs as UID 1654, stores the database in `/data` and Data Protection keys in `/keys` (`DataProtection:KeysPath`), and serves `/healthz`.
 - Servers install/update with `deploy/install.sh <beta|production>` (Docker Compose under `/opt/ledgerly/<channel>`; it writes `.env` and `docker-compose.yml`, never overwrites `ledgerly.env`, backs up the DB before restarting, and waits on `/healthz`). The script is fetched from `main`, so changes to it reach both channels once merged. No Docker on the dev PC: verify image changes through the Actions run (`gh run watch`).
 - Migrations run on container start and can't be rolled back automatically; a rollback means installing the older `--version` and restoring the pre-update backup.
+- Unraid: `deploy/unraid/docker-compose.yml` (Compose Manager plugin) runs the image as `99:100` with `HOME=/tmp`, a busybox init service that chowns the appdata folders, and `/etc/localtime` mounted. The image must keep working under an arbitrary UID; the release workflow's smoke test runs it as 99:100 before publishing.
+- Culture is fixed in `Program.cs` (`Ledgerly:Culture`, default en-US) via `DefaultThreadCurrentCulture` + request localization, because containers have no `LANG` and would format money with the invariant culture (`¤`).
 
 ## Architecture
 
