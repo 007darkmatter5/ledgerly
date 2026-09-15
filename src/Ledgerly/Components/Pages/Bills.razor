@@ -143,28 +143,15 @@
         </MudTable>
     </MudTabPanel>
 
-    <MudTabPanel Text="Schedule" Icon="@Icons.Material.Filled.CalendarMonth">
-        <MudStack Row="true" AlignItems="AlignItems.Center" Class="px-2 pt-2" Wrap="Wrap.Wrap">
-            <MudIconButton Icon="@Icons.Material.Filled.ChevronLeft" OnClick="() => _month = _month.AddMonths(-1)" aria-label="Previous month" />
-            <MudText Typo="Typo.h6" Style="min-width:160px; text-align:center">@_month.ToString("MMMM yyyy")</MudText>
-            <MudIconButton Icon="@Icons.Material.Filled.ChevronRight" OnClick="() => _month = _month.AddMonths(1)" aria-label="Next month" />
-            <MudButton Size="Size.Small" OnClick="() => _month = ThisMonth" Disabled="_month == ThisMonth">This month</MudButton>
-            <MudSpacer />
-            <MudStack Row="true" Spacing="4">
-                <MudStack Spacing="0" AlignItems="AlignItems.End">
-                    <MudText Typo="Typo.caption" Class="mud-text-secondary">Total</MudText>
-                    <MudText Typo="Typo.subtitle1">@MonthSchedule.Sum(d => d.Amount).ToString("C")</MudText>
-                </MudStack>
-                <MudStack Spacing="0" AlignItems="AlignItems.End">
-                    <MudText Typo="Typo.caption" Class="mud-text-secondary">Paid</MudText>
-                    <MudText Typo="Typo.subtitle1" Color="Color.Success">@MonthSchedule.Where(d => d.IsPaid).Sum(d => d.Amount).ToString("C")</MudText>
-                </MudStack>
-                <MudStack Spacing="0" AlignItems="AlignItems.End">
-                    <MudText Typo="Typo.caption" Class="mud-text-secondary">Remaining</MudText>
-                    <MudText Typo="Typo.subtitle1">@MonthSchedule.Where(d => !d.IsPaid).Sum(d => d.Amount).ToString("C")</MudText>
-                </MudStack>
-            </MudStack>
-        </MudStack>
+    <MudTabPanel Text="Calendar" Icon="@Icons.Material.Filled.CalendarMonth">
+        @MonthHeader(showIncomeToggle: true)
+        <div class="px-2 pb-2">
+            <BillCalendar Month="_month" Bills="FilteredBills" Incomes="@(_showIncome ? FilteredIncomes : null)" OnChanged="LoadAsync" />
+        </div>
+    </MudTabPanel>
+
+    <MudTabPanel Text="Schedule" Icon="@Icons.Material.Filled.EventNote">
+        @MonthHeader(showIncomeToggle: false)
         <BillDueTable Items="MonthSchedule" OnChanged="LoadAsync" EmptyText="No bills due this month." />
     </MudTabPanel>
 </MudTabs>
@@ -172,6 +159,9 @@
 @code {
     /// <summary>Preselects a category filter, e.g. from the Categories page (0 = uncategorized).</summary>
     [SupplyParameterFromQuery(Name = "category")] private int? CategoryQuery { get; set; }
+
+    /// <summary>Opens a tab directly: "calendar" or "schedule".</summary>
+    [SupplyParameterFromQuery(Name = "view")] private string? ViewQuery { get; set; }
 
     /// <summary>Preselects a payee filter, e.g. from the Payees page (0 = no payee).</summary>
     [SupplyParameterFromQuery(Name = "payee")] private int? PayeeQuery { get; set; }
@@ -190,6 +180,8 @@
     private string? _search;
     private bool _showInactive;
     private int _tab;
+    private List<Income> _incomes = [];
+    private bool _showIncome = true;
     private DateOnly _month;
 
     private readonly Func<Bill, object> _byName = b => b.Name;
@@ -212,6 +204,39 @@
 
     private List<BillDue> MonthSchedule => BillSchedule.Between(FilteredBills, _month, _month.AddMonths(1).AddDays(-1)).ToList();
 
+    /// <summary>Income for the calendar: it follows the account filter, and is hidden while filtering bills by category, payee or search.</summary>
+    private IEnumerable<Income>? FilteredIncomes =>
+        CategoryFilter is not null || PayeeFilter is not null || !string.IsNullOrWhiteSpace(_search)
+            ? null
+            : _incomes.Where(i => _accountFilter is null || i.DepositToAccountId == _accountFilter);
+
+    /// <summary>Month navigation and totals, shared by the Calendar and Schedule tabs.</summary>
+    private RenderFragment MonthHeader(bool showIncomeToggle) => @<MudStack Row="true" AlignItems="AlignItems.Center" Class="px-2 py-2" Wrap="Wrap.Wrap">
+        <MudIconButton Icon="@Icons.Material.Filled.ChevronLeft" OnClick="() => _month = _month.AddMonths(-1)" aria-label="Previous month" />
+        <MudText Typo="Typo.h6" Style="min-width:160px; text-align:center">@_month.ToString("MMMM yyyy")</MudText>
+        <MudIconButton Icon="@Icons.Material.Filled.ChevronRight" OnClick="() => _month = _month.AddMonths(1)" aria-label="Next month" />
+        <MudButton Size="Size.Small" OnClick="() => _month = ThisMonth" Disabled="_month == ThisMonth">This month</MudButton>
+        @if (showIncomeToggle)
+        {
+            <MudSwitch @bind-Value="_showIncome" Label="Show income" Color="Color.Success" Class="ml-2" />
+        }
+        <MudSpacer />
+        <MudStack Row="true" Spacing="4">
+            <MudStack Spacing="0" AlignItems="AlignItems.End">
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">Total</MudText>
+                <MudText Typo="Typo.subtitle1">@MonthSchedule.Sum(d => d.Amount).ToString("C")</MudText>
+            </MudStack>
+            <MudStack Spacing="0" AlignItems="AlignItems.End">
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">Paid</MudText>
+                <MudText Typo="Typo.subtitle1" Color="Color.Success">@MonthSchedule.Where(d => d.IsPaid).Sum(d => d.Amount).ToString("C")</MudText>
+            </MudStack>
+            <MudStack Spacing="0" AlignItems="AlignItems.End">
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">Remaining</MudText>
+                <MudText Typo="Typo.subtitle1">@MonthSchedule.Where(d => !d.IsPaid).Sum(d => d.Amount).ToString("C")</MudText>
+            </MudStack>
+        </MudStack>
+    </MudStack>;
+
     protected override async Task OnInitializedAsync()
     {
         _month = ThisMonth;
@@ -219,6 +244,7 @@
         _byMonthly = b => Monthly(b);
         CategoryFilter = CategoryQuery;
         PayeeFilter = PayeeQuery;
+        _tab = ViewQuery?.ToLowerInvariant() switch { "calendar" => 1, "schedule" => 2, _ => 0 };
         await LoadAsync();
     }
 
@@ -228,6 +254,7 @@
         _accounts = await Ledger.GetAccountsAsync();
         _categories = await Ledger.GetCategoriesAsync();
         _payees = await Ledger.GetPayeesAsync();
+        _incomes = await Ledger.GetIncomesAsync();
         _loading = false;
     }
 
