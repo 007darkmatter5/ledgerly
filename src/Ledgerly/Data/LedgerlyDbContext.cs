@@ -66,7 +66,10 @@ public class LedgerlyDbContext(DbContextOptions<LedgerlyDbContext> options) : Id
             e.Property(b => b.Frequency).HasConversion<string>().HasMaxLength(20);
             e.Property(b => b.LoanPaymentKind).HasConversion<string>().HasMaxLength(20);
             e.HasOne<Ledger>().WithMany().HasForeignKey(b => b.LedgerId).OnDelete(DeleteBehavior.Cascade);
-            e.HasOne(b => b.PayFromAccount).WithMany().OnDelete(DeleteBehavior.SetNull);
+            e.HasOne(b => b.PayFromAccount).WithMany().HasForeignKey(b => b.PayFromAccountId).OnDelete(DeleteBehavior.SetNull);
+            e.HasOne(b => b.CardAccount).WithMany().HasForeignKey(b => b.CardAccountId).OnDelete(DeleteBehavior.SetNull);
+            e.Property(b => b.CardPaymentRule).HasConversion<string>().HasMaxLength(20);
+            e.Ignore(b => b.PaymentEstimates);
             e.HasOne(b => b.Category).WithMany().OnDelete(DeleteBehavior.SetNull);
             e.HasOne(b => b.Payee).WithMany().OnDelete(DeleteBehavior.SetNull);
             e.HasOne(b => b.Loan).WithMany().OnDelete(DeleteBehavior.SetNull);

@@ -16,22 +16,73 @@
                     </MudSelect>
                 </MudItem>
                 <MudItem xs="12" sm="6">
-                    <MudNumericField @bind-Value="Model.Balance" Label="Balance" Format="N2" Adornment="Adornment.Start" AdornmentText="$" Variant="Variant.Outlined" Margin="Margin.Dense"
-                                     HelperText="@(Model.Type == AccountType.CreditCard ? "Enter the amount owed as a negative" : null)" />
+                    @if (Model.IsCreditCard)
+                    {
+                        <MudNumericField T="decimal" Value="-Model.Balance" ValueChanged="owed => Model.Balance = -owed" Label="Amount owed" Format="N2" Adornment="Adornment.Start" AdornmentText="$" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                         HelperText="Your current card balance. Enter a credit as a negative." />
+                    }
+                    else
+                    {
+                        <MudNumericField @bind-Value="Model.Balance" Label="Balance" Format="N2" Adornment="Adornment.Start" AdornmentText="$" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                    }
                 </MudItem>
                 <MudItem xs="12" sm="6">
                     <DateOnlyPicker @bind-Value="_balanceAsOf" Label="Balance as of" Required="true" HelperText="Start of day; bills on or after this date are projected" />
                 </MudItem>
-                <MudItem xs="12" sm="6">
-                    <MudNumericField @bind-Value="Model.LowBalanceThreshold" Label="Low balance warning" Format="N2" Adornment="Adornment.Start" AdornmentText="$" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true"
-                                     HelperText="Optional: flag projections below this amount" />
-                </MudItem>
+
+                @if (Model.IsCreditCard)
+                {
+                    <MudItem xs="12">
+                        <MudText Typo="Typo.subtitle2">Card details</MudText>
+                    </MudItem>
+                    <MudItem xs="12" sm="4">
+                        <MudNumericField @bind-Value="Model.CreditLimit" Label="Credit limit" Format="N0" Min="0m" Adornment="Adornment.Start" AdornmentText="$" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true" />
+                    </MudItem>
+                    <MudItem xs="12" sm="4">
+                        <MudNumericField @bind-Value="Model.AprPercent" Label="APR" Format="0.##" Min="0m" Max="100m" Adornment="Adornment.End" AdornmentText="%" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true"
+                                         HelperText="Charged only when a balance is carried" />
+                    </MudItem>
+                    <MudItem xs="12" sm="4">
+                        <MudNumericField @bind-Value="Model.StatementDay" Label="Statement closes on day" Min="1" Max="31" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true"
+                                         HelperText="Day of the month, 1–31" />
+                    </MudItem>
+                    <MudItem xs="12" sm="6">
+                        <MudNumericField @bind-Value="Model.MonthlySpending" Label="Everyday spending per month" Format="N2" Min="0m" Adornment="Adornment.Start" AdornmentText="$" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true"
+                                         HelperText="Groceries, gas, dining… anything that isn't a bill" />
+                    </MudItem>
+                    <MudItem xs="12" sm="6">
+                        <MudNumericField @bind-Value="Model.StatementBalance" Label="Last statement balance (optional)" Format="N2" Min="0m" Adornment="Adornment.Start" AdornmentText="$" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true"
+                                         HelperText="Used for a payment due before the next statement" />
+                    </MudItem>
+                    <MudItem xs="12" sm="6">
+                        <MudNumericField @bind-Value="Model.MinimumPaymentPercent" Label="Minimum payment" Format="0.##" Min="0m" Max="100m" Adornment="Adornment.End" AdornmentText="% + interest" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true"
+                                         Placeholder="@CreditCards.DefaultMinimumPercent.ToString("0.##")" HelperText="Of the balance; blank uses 1%" />
+                    </MudItem>
+                    <MudItem xs="12" sm="6">
+                        <MudNumericField @bind-Value="Model.MinimumPaymentFloor" Label="…but at least" Format="N2" Min="0m" Adornment="Adornment.Start" AdornmentText="$" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true"
+                                         Placeholder="@CreditCards.DefaultMinimumFloor.ToString("N2")" HelperText="Blank uses $25" />
+                    </MudItem>
+                }
+                else
+                {
+                    <MudItem xs="12" sm="6">
+                        <MudNumericField @bind-Value="Model.LowBalanceThreshold" Label="Low balance warning" Format="N2" Adornment="Adornment.Start" AdornmentText="$" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true"
+                                         HelperText="Optional: flag projections below this amount" />
+                    </MudItem>
+                }
+
                 <MudItem xs="12" sm="6" Class="d-flex align-center">
                     <MudSwitch @bind-Value="Model.IsActive" Label="Active" Color="Color.Primary" />
                 </MudItem>
                 <MudItem xs="12">
                     <MudTextField @bind-Value="Model.Notes" Label="Notes" Lines="2" Variant="Variant.Outlined" Margin="Margin.Dense" />
                 </MudItem>
+                @if (_error is not null)
+                {
+                    <MudItem xs="12">
+                        <MudAlert Severity="Severity.Error" Dense="true">@_error</MudAlert>
+                    </MudItem>
+                }
             </MudGrid>
         </MudForm>
     </DialogContent>
@@ -47,6 +98,7 @@
 
     private MudForm _form = null!;
     private DateOnly? _balanceAsOf;
+    private string? _error;
 
     protected override void OnInitialized() =>
         _balanceAsOf = Model.Id == 0 ? Ledger.Today : Model.BalanceAsOf;
@@ -58,7 +110,16 @@
             return;
 
         Model.BalanceAsOf = _balanceAsOf.Value;
-        await Ledger.SaveAccountAsync(Model);
-        MudDialog.Close(DialogResult.Ok(Model.Id));
+        if (Model.IsCreditCard)
+            Model.LowBalanceThreshold = null;
+        try
+        {
+            await Ledger.SaveAccountAsync(Model);
+            MudDialog.Close(DialogResult.Ok(Model.Id));
+        }
+        catch (LedgerValidationException ex)
+        {
+            _error = ex.Message;
+        }
     }
 }

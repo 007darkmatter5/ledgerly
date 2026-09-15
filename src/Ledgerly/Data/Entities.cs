@@ -31,6 +31,19 @@ public enum LoanPaymentKind
     ExtraPrincipal
 }
 
+/// <summary>How a bill that pays a credit card works out its amount.</summary>
+public enum CardPaymentRule
+{
+    /// <summary>Pay the full statement balance, so no interest is charged.</summary>
+    StatementBalance,
+
+    /// <summary>Pay the minimum payment; the rest is carried and charged interest.</summary>
+    Minimum,
+
+    /// <summary>Pay the bill's own amount (or the whole balance, if that's less).</summary>
+    FixedAmount
+}
+
 public enum LoanType
 {
     Mortgage,
@@ -129,6 +142,29 @@ public class Account : ILedgerEntity
 
     public bool IsActive { get; set; } = true;
     public string? Notes { get; set; }
+
+    // Credit cards only (cleared for other account types). A card's Balance is negative: the amount owed.
+
+    public decimal? CreditLimit { get; set; }
+
+    /// <summary>Purchase APR as a percentage, e.g. 24.99. Interest is only charged when a statement isn't paid in full.</summary>
+    public decimal? AprPercent { get; set; }
+
+    /// <summary>Day of the month the statement closes (1-31; short months use their last day).</summary>
+    public int? StatementDay { get; set; }
+
+    /// <summary>Typical monthly spending on the card that isn't a bill (groceries, gas...), added at each statement.</summary>
+    public decimal? MonthlySpending { get; set; }
+
+    /// <summary>Balance of the latest statement, if known. Used for payments due before the next statement closes.</summary>
+    public decimal? StatementBalance { get; set; }
+
+    /// <summary>Minimum payment: this percentage of the balance plus interest, but at least <see cref="MinimumPaymentFloor"/>.</summary>
+    public decimal? MinimumPaymentPercent { get; set; }
+
+    public decimal? MinimumPaymentFloor { get; set; }
+
+    public bool IsCreditCard => Type == AccountType.CreditCard;
 }
 
 /// <summary>A recurring (or one-time) bill.</summary>
@@ -166,6 +202,19 @@ public class Bill : ILedgerEntity
 
     /// <summary>For loan bills: whether this is the monthly payment or an extra principal payment.</summary>
     public LoanPaymentKind LoanPaymentKind { get; set; }
+
+    /// <summary>Optional credit card this bill pays. The payment moves money from the pay-from account to the card.</summary>
+    public int? CardAccountId { get; set; }
+    public Account? CardAccount { get; set; }
+
+    /// <summary>For credit card payments: how the amount is worked out.</summary>
+    public CardPaymentRule CardPaymentRule { get; set; }
+
+    /// <summary>
+    /// Estimated amounts for credit card payments by due date, worked out from the card when bills are loaded
+    /// (<see cref="Finance.CreditCards.EstimatePayments"/>). Not stored.
+    /// </summary>
+    public IReadOnlyDictionary<DateOnly, decimal>? PaymentEstimates { get; set; }
 
     public bool AutoPay { get; set; }
     public bool IsActive { get; set; } = true;

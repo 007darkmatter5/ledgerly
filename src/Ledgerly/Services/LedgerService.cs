@@ -124,7 +124,24 @@ public class LedgerService(IDbContextFactory<LedgerlyDbContext> dbFactory, ICurr
         return accounts.OrderBy(a => a.Type).ThenBy(a => a.Name).ToList();
     }
 
-    public Task SaveAccountAsync(Account account) => SaveAsync(account);
+    /// <summary>Saves an account. Credit card details are cleared for other types. Throws <see cref="LedgerValidationException"/> for invalid card details.</summary>
+    public Task SaveAccountAsync(Account account)
+    {
+        if (!account.IsCreditCard)
+        {
+            (account.CreditLimit, account.AprPercent, account.StatementDay, account.MonthlySpending) = (null, null, null, null);
+            (account.StatementBalance, account.MinimumPaymentPercent, account.MinimumPaymentFloor) = (null, null, null);
+        }
+        else if (account.StatementDay is < 1 or > 31)
+            throw new LedgerValidationException("The statement closing day must be between 1 and 31.");
+        else if (account.AprPercent is < 0 or > 100)
+            throw new LedgerValidationException("The APR must be between 0% and 100%.");
+        else if (account.CreditLimit < 0 || account.MonthlySpending < 0 || account.StatementBalance < 0
+                 || account.MinimumPaymentFloor < 0 || account.MinimumPaymentPercent is < 0 or > 100)
+            throw new LedgerValidationException("Credit card amounts can't be negative.");
+
+        return SaveAsync(account);
+    }
 
     public Task DeleteAccountAsync(int id) => DeleteAsync<Account>(id);
 
@@ -216,23 +233,38 @@ public class LedgerService(IDbContextFactory<LedgerlyDbContext> dbFactory, ICurr
         var bills = await db.Bills.AsNoTracking()
             .Where(b => b.LedgerId == ledgerId)
             .Include(b => b.PayFromAccount)
+            .Include(b => b.CardAccount)
             .Include(b => b.Loan).ThenInclude(l => l!.Lender)
             .Include(b => b.Payee)
             .Include(b => b.Category)
             .Include(b => b.Occurrences)
             .ToListAsync();
+        CreditCards.EstimatePayments(bills, Today.AddYears(1));
         return bills.OrderBy(b => b.Name).ToList();
     }
 
+    /// <summary>Saves a bill. Throws <see cref="LedgerValidationException"/> if it links a loan and a card, or pays a card from a card.</summary>
     public async Task SaveBillAsync(Bill bill)
     {
         var ledgerId = await LedgerIdAsync();
         await using (var db = await dbFactory.CreateDbContextAsync())
         {
             await EnsureInLedgerAsync(db.Accounts, bill.PayFromAccountId, ledgerId);
+            await EnsureInLedgerAsync(db.Accounts, bill.CardAccountId, ledgerId);
             await EnsureInLedgerAsync(db.Loans, bill.LoanId, ledgerId);
             await EnsureInLedgerAsync(db.Categories, bill.CategoryId, ledgerId);
             await EnsureInLedgerAsync(db.Payees, bill.PayeeId, ledgerId);
+
+            if (bill.CardAccountId is { } cardId)
+            {
+                if (bill.LoanId is not null)
+                    throw new LedgerValidationException("A bill can pay a loan or a credit card, not both.");
+                var types = await db.Accounts.Where(a => a.Id == cardId || a.Id == bill.PayFromAccountId).Select(a => new { a.Id, a.Type }).ToListAsync();
+                if (types.Single(a => a.Id == cardId).Type != AccountType.CreditCard)
+                    throw new LedgerValidationException("Choose a credit card account for this payment.");
+                if (bill.PayFromAccountId == cardId || types.Any(a => a.Id == bill.PayFromAccountId && a.Type == AccountType.CreditCard))
+                    throw new LedgerValidationException("Pay a credit card from a bank account, not from a credit card.");
+            }
         }
         await SaveAsync(bill);
     }

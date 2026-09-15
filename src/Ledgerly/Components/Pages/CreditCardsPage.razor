@@ -1,0 +1,138 @@
+@page "/cards"
+@inject LedgerService Ledger
+@inject IDialogService Dialogs
+@inject ISnackbar Snackbar
+@inject NavigationManager Navigation
+
+<PageTitle>Credit cards · Ledgerly</PageTitle>
+
+<MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-4" Wrap="Wrap.Wrap">
+    <MudStack Spacing="0">
+        <MudText Typo="Typo.h4">Credit cards</MudText>
+        <MudText Typo="Typo.body2" Class="mud-text-secondary">What you owe, how much credit you're using, and what the next payment will be.</MudText>
+    </MudStack>
+    <MudSpacer />
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="AddCardAsync">Add card</MudButton>
+</MudStack>
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+    return;
+}
+
+@if (_cards.Count == 0)
+{
+    <MudPaper Elevation="1" Class="pa-6">
+        <MudText Class="mud-text-secondary">
+            No credit cards yet. Add one with its balance, limit and statement day, then charge bills to it and set up a payment from your bank account.
+        </MudText>
+    </MudPaper>
+    return;
+}
+
+<MudGrid Spacing="3" Class="mb-1">
+    <MudItem xs="12" sm="4">
+        <StatCard Label="Total owed" Icon="@Icons.Material.Filled.CreditCard">
+            <Value>@_cards.Where(c => c.Card.IsActive).Sum(c => c.Owed).ToString("C")</Value>
+        </StatCard>
+    </MudItem>
+    <MudItem xs="12" sm="4">
+        <StatCard Label="Credit used" Icon="@Icons.Material.Filled.DataUsage">
+            <Value>@(TotalLimit > 0 ? (OwedOnLimitedCards / TotalLimit).ToString("P0") : "—")</Value>
+            <Caption>@(TotalLimit > 0 ? $"of {TotalLimit:C0} total limit" : "Add credit limits to see this")</Caption>
+        </StatCard>
+    </MudItem>
+    <MudItem xs="12" sm="4">
+        <StatCard Label="Payments in the next 30 days" Icon="@Icons.Material.Filled.Payments">
+            <Value>@_cards.Where(c => c.Card.IsActive).SelectMany(c => c.PaymentsWithin30Days).Sum(p => -p.Amount).ToString("C")</Value>
+        </StatCard>
+    </MudItem>
+</MudGrid>
+
+<MudGrid Spacing="3">
+    @foreach (var summary in _cards)
+    {
+        var card = summary.Card;
+        var utilization = CreditCards.Utilization(card, summary.Owed);
+        <MudItem xs="12" sm="6" md="4">
+            <MudCard Elevation="1" Style="height:100%; cursor:pointer" @onclick="@(() => Navigation.NavigateTo($"cards/{card.Id}"))">
+                <MudCardHeader>
+                    <CardHeaderAvatar>
+                        <MudAvatar Color="Color.Primary" Variant="Variant.Outlined"><MudIcon Icon="@Icons.Material.Filled.CreditCard" /></MudAvatar>
+                    </CardHeaderAvatar>
+                    <CardHeaderContent>
+                        <MudText Typo="Typo.subtitle1" Class="@(card.IsActive ? null : "mud-text-disabled")">@card.Name</MudText>
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                            @(card.AprPercent is { } apr ? $"{apr:0.##}% APR" : "No APR set")@(card.IsActive ? "" : " · Inactive")
+                        </MudText>
+                    </CardHeaderContent>
+                </MudCardHeader>
+                <MudCardContent Class="pt-0">
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary">Owed now</MudText>
+                    <MudText Typo="Typo.h5">@summary.Owed.ToString("C")</MudText>
+                    @if (utilization is { } used)
+                    {
+                        <MudProgressLinear Value="@((double)Math.Min(1m, used) * 100)" Color="@UtilizationColor(used)" Rounded="true" Class="mt-2" />
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary">@used.ToString("P0") of @card.CreditLimit?.ToString("C0") limit</MudText>
+                    }
+                    <MudDivider Class="my-3" />
+                    @if (summary.NextPayment is { } next)
+                    {
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary">Next payment</MudText>
+                        <MudText Typo="Typo.body1">@((-next.Amount).ToString("C")) <span class="mud-text-secondary">on @Display.ShortDate(next.Date)</span></MudText>
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary">@Display.Of(next.Bill!.CardPaymentRule) · from @(next.Bill.PayFromAccount?.Name ?? "no account")</MudText>
+                    }
+                    else
+                    {
+                        <MudText Typo="Typo.body2" Color="Color.Warning">No payment set up</MudText>
+                    }
+                </MudCardContent>
+            </MudCard>
+        </MudItem>
+    }
+</MudGrid>
+
+@code {
+    private sealed record CardSummary(Account Card, decimal Owed, CardEntry? NextPayment, IReadOnlyList<CardEntry> PaymentsWithin30Days);
+
+    private bool _loading = true;
+    private List<CardSummary> _cards = [];
+
+    private IEnumerable<CardSummary> ActiveWithLimits => _cards.Where(c => c.Card.IsActive && c.Card.CreditLimit > 0);
+    private decimal TotalLimit => ActiveWithLimits.Sum(c => c.Card.CreditLimit!.Value);
+    private decimal OwedOnLimitedCards => ActiveWithLimits.Sum(c => Math.Max(0m, c.Owed));
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        var today = Ledger.Today;
+        var bills = await Ledger.GetBillsAsync();
+        _cards = (await Ledger.GetAccountsAsync())
+            .Where(a => a.IsCreditCard)
+            .Select(card =>
+            {
+                var simulation = CreditCards.Simulate(card, bills, today.AddMonths(3));
+                var payments = simulation.Entries.Where(e => e.Kind == CardEntryKind.Payment && e.Date >= today).ToList();
+                return new CardSummary(card, simulation.OwedOn(today), payments.FirstOrDefault(), payments.Where(p => p.Date <= today.AddDays(30)).ToList());
+            })
+            .OrderBy(c => !c.Card.IsActive).ThenBy(c => c.Card.Name)
+            .ToList();
+        _loading = false;
+    }
+
+    public static Color UtilizationColor(decimal utilization) =>
+        utilization < 0.3m ? Color.Success : utilization < 0.7m ? Color.Warning : Color.Error;
+
+    private async Task AddCardAsync()
+    {
+        var parameters = new DialogParameters<AccountDialog> { { d => d.Model, new Account { Type = AccountType.CreditCard } } };
+        var dialog = await Dialogs.ShowAsync<AccountDialog>("Add credit card", parameters, new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true });
+        if (await dialog.Result is { Canceled: false, Data: int id })
+        {
+            Snackbar.Add("Card added", Severity.Success);
+            Navigation.NavigateTo($"cards/{id}");
+        }
+    }
+}

@@ -78,6 +78,10 @@
                         {
                             <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Href="@($"loans/{context.Loan.Id}")" Icon="@Icons.Material.Filled.RealEstateAgent">@context.Loan.Name@(context.LoanPaymentKind == LoanPaymentKind.ExtraPrincipal ? " · extra" : "")</MudChip>
                         }
+                        @if (context.CardAccount is not null)
+                        {
+                            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Href="@($"cards/{context.CardAccount.Id}")" Icon="@Icons.Material.Filled.CreditCard">@context.CardAccount.Name</MudChip>
+                        }
                         @if (!context.IsActive)
                         {
                             <MudChip T="string" Size="Size.Small">Inactive</MudChip>
@@ -86,7 +90,15 @@
                 </MudTd>
                 <MudTd DataLabel="Category"><CategoryChip Category="context.Category" /></MudTd>
                 <MudTd DataLabel="Amount" Style="text-align:right; white-space:nowrap">
-                    @context.ExpectedAmount.ToString("C")
+                    @if (context.CardAccount is not null && context.CardPaymentRule != CardPaymentRule.FixedAmount)
+                    {
+                        <span>≈ @NextCardPayment(context).ToString("C")</span>
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">@(context.CardPaymentRule == CardPaymentRule.StatementBalance ? "statement balance" : "minimum")</MudText>
+                    }
+                    else
+                    {
+                        @context.ExpectedAmount.ToString("C")
+                    }
                     @if (context.IsVariable)
                     {
                         <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">up to @context.MaxAmount?.ToString("C")</MudText>
@@ -183,7 +195,7 @@
     private readonly Func<Bill, object> _byName = b => b.Name;
     private readonly Func<Bill, object> _byCategory = b => b.Category?.Name ?? "￿"; // uncategorized last
     private readonly Func<Bill, object> _byAmount = b => b.ExpectedAmount;
-    private readonly Func<Bill, object> _byMonthly = b => Monthly(b);
+    private Func<Bill, object> _byMonthly = null!;
     private Func<Bill, object> _byNextDue = null!;
 
     private DateOnly ThisMonth => new(Ledger.Today.Year, Ledger.Today.Month, 1);
@@ -204,6 +216,7 @@
     {
         _month = ThisMonth;
         _byNextDue = b => NextDue(b) ?? DateOnly.MaxValue;
+        _byMonthly = b => Monthly(b);
         CategoryFilter = CategoryQuery;
         PayeeFilter = PayeeQuery;
         await LoadAsync();
@@ -220,7 +233,12 @@
 
     private DateOnly? NextDue(Bill bill) => Recurrence.Next(bill.Frequency, bill.StartDate, bill.EndDate, Ledger.Today);
 
-    private static decimal Monthly(Bill bill) => Recurrence.MonthlyEquivalent(bill.Frequency, bill.ExpectedAmount);
+    private decimal Monthly(Bill bill) => Recurrence.MonthlyEquivalent(bill.Frequency,
+        bill.CardAccount is not null && bill.CardPaymentRule != CardPaymentRule.FixedAmount ? NextCardPayment(bill) : bill.ExpectedAmount);
+
+    /// <summary>A card payment's next estimated amount (the statement or minimum), or its own amount if there's no estimate.</summary>
+    private decimal NextCardPayment(Bill bill) =>
+        bill.PaymentEstimates?.Where(e => e.Key >= Ledger.Today).OrderBy(e => e.Key).Select(e => (decimal?)e.Value).FirstOrDefault() ?? bill.ExpectedAmount;
 
     private async Task EditAsync(Bill? bill)
     {

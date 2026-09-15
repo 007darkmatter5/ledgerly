@@ -13,7 +13,11 @@ public static class SampleData
 
         var checking = new Account { Name = "Everyday Checking", Type = AccountType.Checking, Balance = 2450m, BalanceAsOf = today, LowBalanceThreshold = 500m };
         var savings = new Account { Name = "Emergency Savings", Type = AccountType.Savings, Balance = 8000m, BalanceAsOf = today };
-        var card = new Account { Name = "Rewards Card", Type = AccountType.CreditCard, Balance = -620m, BalanceAsOf = today };
+        var card = new Account
+        {
+            Name = "Rewards Card", Type = AccountType.CreditCard, Balance = -620m, BalanceAsOf = today,
+            CreditLimit = 6000m, AprPercent = 24.99m, StatementDay = 28, MonthlySpending = 450m
+        };
 
         Payee NewPayee(string name) => new() { Name = name };
         var firstStreetBank = NewPayee("First Street Bank");
@@ -72,7 +76,7 @@ public static class SampleData
             new Bill { Name = "Phone", Payee = mobileCo, Category = utilities, ExpectedAmount = 85m, StartDate = Day(18), PayFromAccount = card, AutoPay = true },
             new Bill { Name = "Streaming", Payee = streamCo, Category = entertainment, ExpectedAmount = 15.99m, StartDate = Day(3), PayFromAccount = card, AutoPay = true },
             new Bill { Name = "Car Insurance", Payee = safeDrive, Category = insurance, ExpectedAmount = 540m, Frequency = Frequency.SemiAnnually, StartDate = Day(1).AddMonths(1), PayFromAccount = checking },
-            new Bill { Name = "Credit Card Payment", Payee = rewardsCard, Category = debt, ExpectedAmount = 300m, MaxAmount = 650m, StartDate = Day(22), PayFromAccount = checking }
+            new Bill { Name = "Rewards Card Payment", Payee = rewardsCard, Category = debt, StartDate = Day(22), PayFromAccount = checking, CardAccount = card, CardPaymentRule = CardPaymentRule.StatementBalance }
         ];
     }
 

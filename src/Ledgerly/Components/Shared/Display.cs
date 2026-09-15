@@ -12,6 +12,13 @@ public static class Display
 
     public static string Of(LoanType type) => type == LoanType.CreditLine ? "Line of credit" : type.ToString();
 
+    public static string Of(CardPaymentRule rule) => rule switch
+    {
+        CardPaymentRule.StatementBalance => "Pays statement in full",
+        CardPaymentRule.Minimum => "Pays the minimum",
+        _ => "Pays a fixed amount"
+    };
+
     public static string Date(DateOnly date) => date.ToString("MMM d, yyyy");
 
     public static string ShortDate(DateOnly date) => date.ToString("ddd, MMM d");

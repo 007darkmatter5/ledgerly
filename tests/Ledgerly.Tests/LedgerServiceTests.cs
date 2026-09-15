@@ -245,6 +245,40 @@ public sealed class LedgerServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Card_payments_must_pay_a_credit_card_from_a_bank_account_in_the_same_ledger()
+    {
+        var alice = ServiceFor("alice");
+        var checking = Checking();
+        var card = new Account { Name = "Visa", Type = AccountType.CreditCard, Balance = -400m, BalanceAsOf = new DateOnly(2026, 9, 1), StatementDay = 25, CreditLimit = 3000m };
+        var otherCard = new Account { Name = "Amex", Type = AccountType.CreditCard, BalanceAsOf = new DateOnly(2026, 9, 1) };
+        await alice.SaveAccountAsync(checking);
+        await alice.SaveAccountAsync(card);
+        await alice.SaveAccountAsync(otherCard);
+        Bill Payment(int? from, int cardId) => new() { Name = "Visa payment", StartDate = new DateOnly(2026, 10, 20), PayFromAccountId = from, CardAccountId = cardId };
+
+        await alice.SaveBillAsync(Payment(checking.Id, card.Id));
+        await Assert.ThrowsAsync<LedgerValidationException>(() => alice.SaveBillAsync(Payment(otherCard.Id, card.Id)));
+        await Assert.ThrowsAsync<LedgerValidationException>(() => alice.SaveBillAsync(Payment(checking.Id, checking.Id)));
+        await Assert.ThrowsAsync<LedgerValidationException>(() => alice.SaveBillAsync(Payment(card.Id, card.Id)));
+
+        var bob = ServiceFor("bob");
+        var bobChecking = Checking("Bob checking");
+        await bob.SaveAccountAsync(bobChecking);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => bob.SaveBillAsync(Payment(bobChecking.Id, card.Id)));
+
+        // Loaded bills carry the payment estimate worked out from the card.
+        var payment = Assert.Single(await alice.GetBillsAsync());
+        Assert.Equal(400m, payment.PaymentEstimates![new DateOnly(2026, 10, 20)]);
+
+        // Card details are cleared if the account stops being a card, and must make sense on a card.
+        card.StatementDay = 32;
+        await Assert.ThrowsAsync<LedgerValidationException>(() => alice.SaveAccountAsync(card));
+        checking.CreditLimit = 1000m;
+        await alice.SaveAccountAsync(checking);
+        Assert.Null((await alice.GetAccountsAsync()).Single(a => a.Id == checking.Id).CreditLimit);
+    }
+
+    [Fact]
     public async Task Categories_are_private_unique_per_ledger_and_trimmed()
     {
         var alice = ServiceFor("alice");

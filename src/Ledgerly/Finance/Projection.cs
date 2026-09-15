@@ -14,9 +14,22 @@ public enum ProjectionMode
 public enum ProjectionEntryKind
 {
     Bill,
-    Income
+    Income,
+
+    /// <summary>A payment arriving on a credit card.</summary>
+    CardPayment,
+
+    /// <summary>A credit card's typical spending, added at its statement.</summary>
+    CardSpending,
+
+    /// <summary>Interest charged on a credit card.</summary>
+    CardInterest
 }
 
+/// <param name="IsTransfer">
+/// Money moving between two of the projected accounts (paying a card from a projected account), so it isn't
+/// counted as money in or out.
+/// </param>
 public record ProjectionEntry(
     DateOnly Date,
     ProjectionEntryKind Kind,
@@ -28,7 +41,11 @@ public record ProjectionEntry(
     int? BillId = null,
     DateOnly? DueDate = null,
     bool IsPaid = false,
-    bool IsEstimate = false);
+    bool IsEstimate = false,
+    bool IsTransfer = false)
+{
+    public bool IsMoneyIn => Kind is ProjectionEntryKind.Income or ProjectionEntryKind.CardPayment;
+}
 
 public class ProjectionResult
 {
@@ -38,8 +55,8 @@ public class ProjectionResult
 
     public decimal StartingBalance => Accounts.Sum(a => a.Balance);
     public decimal EndingBalance => Entries.Count == 0 ? StartingBalance : Entries[^1].RunningBalance;
-    public decimal TotalOut => -Entries.Where(e => e.Kind == ProjectionEntryKind.Bill).Sum(e => e.Amount);
-    public decimal TotalIn => Entries.Where(e => e.Kind == ProjectionEntryKind.Income).Sum(e => e.Amount);
+    public decimal TotalOut => -Entries.Where(e => !e.IsMoneyIn && !e.IsTransfer).Sum(e => e.Amount);
+    public decimal TotalIn => Entries.Where(e => e.IsMoneyIn && !e.IsTransfer).Sum(e => e.Amount);
 
     /// <summary>Sum of the accounts' thresholds, or null if none set one.</summary>
     public decimal? LowBalanceThreshold =>
@@ -63,7 +80,9 @@ public static class Projection
     /// <summary>
     /// Projects the combined running balance of <paramref name="accounts"/> through <paramref name="through"/>.
     /// Each account starts from its balance as of its as-of date; every bill occurrence and income
-    /// dated on or after that day is applied. Paid bills use the date they were paid.
+    /// dated on or after that day is applied. Paid bills use the date they were paid. Credit card payments are
+    /// worked out from the card (<see cref="CreditCards.Simulate"/>), and a projected card also gets its
+    /// typical spending, interest and incoming payments.
     /// </summary>
     public static ProjectionResult Build(
         IReadOnlyCollection<Account> accounts,
@@ -72,15 +91,28 @@ public static class Projection
         DateOnly through,
         ProjectionMode mode = ProjectionMode.Expected)
     {
+        var billList = bills as IReadOnlyCollection<Bill> ?? bills.ToList();
         var byId = accounts.ToDictionary(a => a.Id);
         var items = new List<ProjectionEntry>();
 
-        foreach (var bill in bills)
+        var simulations = new Dictionary<int, CardSimulation?>();
+        CardSimulation? SimulationFor(int cardId, Account? fallback)
+        {
+            if (!simulations.TryGetValue(cardId, out var simulation))
+            {
+                var card = byId.GetValueOrDefault(cardId) ?? fallback;
+                simulations[cardId] = simulation = card is null ? null : CreditCards.Simulate(card, billList, through, mode);
+            }
+            return simulation;
+        }
+
+        foreach (var bill in billList)
         {
             if (!bill.IsActive || bill.PayFromAccountId is not { } accountId || !byId.TryGetValue(accountId, out var account))
                 continue;
 
             var recorded = bill.Occurrences.ToDictionary(o => o.DueDate);
+            var cardSimulation = bill.CardAccountId is { } cardId ? SimulationFor(cardId, bill.CardAccount) : null;
 
             // Look back a bit so bills paid late (after the as-of date) for earlier due dates are counted.
             var lookback = account.BalanceAsOf.AddMonths(-3);
@@ -91,12 +123,33 @@ public static class Projection
                 if (date < account.BalanceAsOf || date > through)
                     continue;
 
+                var cardEstimate = occurrence?.Amount is null ? cardSimulation?.PaymentFor(bill, due) : null;
                 var amount = occurrence?.Amount
+                    ?? cardEstimate
                     ?? (mode == ProjectionMode.WorstCase ? bill.MaxAmount ?? bill.ExpectedAmount : bill.ExpectedAmount);
-                var isEstimate = occurrence?.Amount is null && bill.IsVariable;
+                var isEstimate = occurrence?.Amount is null && (bill.IsVariable || cardEstimate is not null);
 
                 items.Add(new ProjectionEntry(date, ProjectionEntryKind.Bill, bill.Name, account.Id, account.Name,
-                    -amount, 0m, bill.Id, due, occurrence?.IsPaid ?? false, isEstimate));
+                    -amount, 0m, bill.Id, due, occurrence?.IsPaid ?? false, isEstimate,
+                    IsTransfer: bill.CardAccountId is { } paidCard && byId.ContainsKey(paidCard)));
+            }
+        }
+
+        // Charges to a projected card come from the bills above; its spending, interest and payments come from the card.
+        foreach (var card in accounts.Where(a => a.IsCreditCard))
+        {
+            foreach (var entry in SimulationFor(card.Id, null)!.Entries.Where(e => e.Kind != CardEntryKind.Charge))
+            {
+                var kind = entry.Kind switch
+                {
+                    CardEntryKind.Payment => ProjectionEntryKind.CardPayment,
+                    CardEntryKind.Interest => ProjectionEntryKind.CardInterest,
+                    _ => ProjectionEntryKind.CardSpending
+                };
+                var isPaid = entry.Bill?.Occurrences.FirstOrDefault(o => o.DueDate == entry.DueDate)?.IsPaid ?? false;
+                items.Add(new ProjectionEntry(entry.Date, kind, entry.Description, card.Id, card.Name, -entry.Amount, 0m,
+                    entry.Bill?.Id, entry.DueDate, isPaid, entry.IsEstimate,
+                    IsTransfer: entry.Bill?.PayFromAccountId is { } from && byId.ContainsKey(from)));
             }
         }
 
@@ -115,8 +168,8 @@ public static class Projection
         var entries = new List<ProjectionEntry>(items.Count);
         var running = accounts.Sum(a => a.Balance);
 
-        // Within a day, apply income before bills so same-day paychecks cover same-day bills.
-        foreach (var item in items.OrderBy(i => i.Date).ThenBy(i => i.Kind == ProjectionEntryKind.Bill).ThenBy(i => i.Description))
+        // Within a day, apply money coming in before money going out so same-day paychecks cover same-day bills.
+        foreach (var item in items.OrderBy(i => i.Date).ThenBy(i => !i.IsMoneyIn).ThenBy(i => i.Description))
         {
             running += item.Amount;
             entries.Add(item with { RunningBalance = running });

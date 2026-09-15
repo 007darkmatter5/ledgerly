@@ -122,8 +122,8 @@ else if (belowThreshold is not null)
             </MudTd>
             <MudTd DataLabel="Description">
                 <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center">
-                    <MudIcon Icon="@(context.Kind == ProjectionEntryKind.Income ? Icons.Material.Filled.ArrowDownward : Icons.Material.Filled.ArrowUpward)"
-                             Color="@(context.Kind == ProjectionEntryKind.Income ? Color.Success : Color.Default)" Size="Size.Small" />
+                    <MudIcon Icon="@(context.IsTransfer ? Icons.Material.Filled.SwapHoriz : context.IsMoneyIn ? Icons.Material.Filled.ArrowDownward : Icons.Material.Filled.ArrowUpward)"
+                             Color="@(context.IsMoneyIn && !context.IsTransfer ? Color.Success : Color.Default)" Size="Size.Small" />
                     <span>@context.Description</span>
                     @if (context.IsPaid)
                     {

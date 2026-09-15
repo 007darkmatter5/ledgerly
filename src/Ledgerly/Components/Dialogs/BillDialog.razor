@@ -27,13 +27,27 @@
                     </MudStack>
                 </MudItem>
 
-                <MudItem xs="12" sm="4">
-                    <MudNumericField @bind-Value="Model.ExpectedAmount" Label="Expected amount" Format="N2" Min="0m" Adornment="Adornment.Start" AdornmentText="$" Variant="Variant.Outlined" Margin="Margin.Dense" Required="true" />
-                </MudItem>
-                <MudItem xs="12" sm="4">
-                    <MudNumericField @bind-Value="Model.MaxAmount" Label="Up to (optional)" Format="N2" Min="0m" Adornment="Adornment.Start" AdornmentText="$" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true"
-                                     HelperText="For bills that vary, like utilities" Validation="@(new Func<decimal?, string?>(ValidateMax))" />
-                </MudItem>
+                @if (IsCardPayment && Model.CardPaymentRule != CardPaymentRule.FixedAmount)
+                {
+                    <MudItem xs="12" sm="8">
+                        <MudAlert Severity="Severity.Normal" Dense="true" Variant="Variant.Outlined">
+                            The amount is worked out from the card each month: @(Model.CardPaymentRule == CardPaymentRule.StatementBalance ? "the full statement balance" : "the minimum payment").
+                        </MudAlert>
+                    </MudItem>
+                }
+                else
+                {
+                    <MudItem xs="12" sm="4">
+                        <MudNumericField @bind-Value="Model.ExpectedAmount" Label="@(IsCardPayment ? "Payment amount" : "Expected amount")" Format="N2" Min="0m" Adornment="Adornment.Start" AdornmentText="$" Variant="Variant.Outlined" Margin="Margin.Dense" Required="true" />
+                    </MudItem>
+                    <MudItem xs="12" sm="4">
+                        @if (!IsCardPayment)
+                        {
+                            <MudNumericField @bind-Value="Model.MaxAmount" Label="Up to (optional)" Format="N2" Min="0m" Adornment="Adornment.Start" AdornmentText="$" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true"
+                                             HelperText="For bills that vary, like utilities" Validation="@(new Func<decimal?, string?>(ValidateMax))" />
+                        }
+                    </MudItem>
+                }
                 <MudItem xs="12" sm="4">
                     <MudSelect @bind-Value="Model.Frequency" Label="Repeats" Variant="Variant.Outlined" Margin="Margin.Dense">
                         @foreach (var frequency in Enum.GetValues<Frequency>())
@@ -55,26 +69,44 @@
                 </MudItem>
 
                 <MudItem xs="12" sm="6">
-                    <MudSelect T="int?" @bind-Value="Model.PayFromAccountId" Label="Paid from account" Variant="Variant.Outlined" Margin="Margin.Dense"
+                    <MudSelect T="int?" @bind-Value="Model.PayFromAccountId" Label="@(IsCardPayment ? "Paid from account" : "Paid from (account or card)")" Variant="Variant.Outlined" Margin="Margin.Dense"
                                ToStringFunc="@(id => _accounts.FirstOrDefault(a => a.Id == id)?.Name ?? "Not assigned")"
                                HelperText="@(_accounts.Count == 0 ? "Add an account first to project balances" : null)">
                         <MudSelectItem T="int?" Value="null">Not assigned</MudSelectItem>
-                        @foreach (var account in _accounts)
+                        @foreach (var account in _accounts.Where(a => !IsCardPayment || !a.IsCreditCard))
                         {
-                            <MudSelectItem T="int?" Value="account.Id">@account.Name</MudSelectItem>
+                            <MudSelectItem T="int?" Value="account.Id">@account.Name@(account.IsCreditCard ? " (credit card)" : "")</MudSelectItem>
                         }
                     </MudSelect>
                 </MudItem>
                 <MudItem xs="12" sm="6">
-                    <MudSelect T="int?" Value="Model.LoanId" ValueChanged="OnLoanChanged" Label="Pays a loan (optional)" Variant="Variant.Outlined" Margin="Margin.Dense"
-                               ToStringFunc="@(id => _loans.FirstOrDefault(l => l.Id == id)?.Name ?? "None")">
-                        <MudSelectItem T="int?" Value="null">None</MudSelectItem>
+                    <MudSelect T="string" Value="PaysOff" ValueChanged="OnPaysOffChanged" Label="Pays off a loan or card (optional)" Variant="Variant.Outlined" Margin="Margin.Dense"
+                               ToStringFunc="DescribePaysOff">
+                        <MudSelectItem T="string" Value="@("")">None</MudSelectItem>
                         @foreach (var loan in _loans)
                         {
-                            <MudSelectItem T="int?" Value="loan.Id">@loan.Name</MudSelectItem>
+                            <MudSelectItem T="string" Value="@($"loan:{loan.Id}")">@loan.Name (loan)</MudSelectItem>
+                        }
+                        @foreach (var card in _cards)
+                        {
+                            <MudSelectItem T="string" Value="@($"card:{card.Id}")">@card.Name (credit card)</MudSelectItem>
                         }
                     </MudSelect>
                 </MudItem>
+
+                @if (IsCardPayment)
+                {
+                    <MudItem xs="12">
+                        <MudRadioGroup T="CardPaymentRule" @bind-Value="Model.CardPaymentRule">
+                            <MudRadio T="CardPaymentRule" Value="CardPaymentRule.StatementBalance" Color="Color.Primary">Pay the statement in full</MudRadio>
+                            <MudRadio T="CardPaymentRule" Value="CardPaymentRule.Minimum" Color="Color.Primary">Pay the minimum</MudRadio>
+                            <MudRadio T="CardPaymentRule" Value="CardPaymentRule.FixedAmount" Color="Color.Primary">Pay a fixed amount</MudRadio>
+                        </MudRadioGroup>
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                            The payment comes out of the paid-from account and lowers what you owe on the card. Record the actual amount when you mark it paid.
+                        </MudText>
+                    </MudItem>
+                }
 
                 @if (Model.LoanId is not null)
                 {
@@ -100,6 +132,12 @@
                 <MudItem xs="12">
                     <MudTextField @bind-Value="Model.Notes" Label="Notes" Lines="2" Variant="Variant.Outlined" Margin="Margin.Dense" />
                 </MudItem>
+                @if (_error is not null)
+                {
+                    <MudItem xs="12">
+                        <MudAlert Severity="Severity.Error" Dense="true">@_error</MudAlert>
+                    </MudItem>
+                }
             </MudGrid>
         </MudForm>
     </DialogContent>
@@ -117,19 +155,59 @@
     private List<Category> _categories = [];
     private List<Account> _accounts = [];
     private List<Loan> _loans = [];
+    private List<Account> _cards = [];
     private DateOnly? _startDate;
     private DateOnly? _endDate;
+    private string? _error;
+
+    /// <summary>Prefills the first due date, e.g. when setting up a card's payment from the card page.</summary>
+    [Parameter] public DateOnly? SuggestedStartDate { get; set; }
+
+    private bool IsCardPayment => Model.CardAccountId is not null;
+
+    private string PaysOff => Model.LoanId is { } loanId ? $"loan:{loanId}" : Model.CardAccountId is { } cardId ? $"card:{cardId}" : "";
 
     protected override async Task OnInitializedAsync()
     {
-        _startDate = Model.Id == 0 ? null : Model.StartDate;
+        _startDate = Model.Id == 0 ? SuggestedStartDate : Model.StartDate;
         _endDate = Model.EndDate;
         _categories = await Ledger.GetCategoriesAsync();
         _accounts = await Ledger.GetAccountsAsync(activeOnly: true);
+        _cards = (await Ledger.GetAccountsAsync()).Where(a => a.IsCreditCard && (a.IsActive || a.Id == Model.CardAccountId)).ToList();
         _loans = (await Ledger.GetLoansAsync()).Where(l => l.IsActive || l.Id == Model.LoanId).ToList();
 
         if (Model.Id == 0 && Model.PayFromAccountId is null && _accounts.FirstOrDefault(a => a.Type == AccountType.Checking) is { } checking)
             Model.PayFromAccountId = checking.Id;
+    }
+
+    private string DescribePaysOff(string? value) => value switch
+    {
+        null or "" => "None",
+        _ when value.StartsWith("loan:") => _loans.FirstOrDefault(l => $"loan:{l.Id}" == value)?.Name ?? "",
+        _ => _cards.FirstOrDefault(c => $"card:{c.Id}" == value)?.Name ?? ""
+    };
+
+    private void OnPaysOffChanged(string? value)
+    {
+        int? IdAfter(string prefix) => value?.StartsWith(prefix) == true && int.TryParse(value[prefix.Length..], out var id) ? id : null;
+
+        Model.CardAccountId = IdAfter("card:");
+        if (Model.CardAccountId is null)
+        {
+            OnLoanChanged(IdAfter("loan:"));
+            return;
+        }
+
+        Model.LoanId = null;
+        if (_cards.FirstOrDefault(c => c.Id == Model.CardAccountId) is not { } card)
+            return;
+
+        // Prefill from the card when the bill is still blank, and never pay a card from a card.
+        if (string.IsNullOrWhiteSpace(Model.Name))
+            Model.Name = $"{card.Name} payment";
+        if (_accounts.FirstOrDefault(a => a.Id == Model.PayFromAccountId)?.IsCreditCard == true)
+            Model.PayFromAccountId = _accounts.FirstOrDefault(a => a.Type == AccountType.Checking)?.Id;
+        Model.MaxAmount = null;
     }
 
     private async Task AddCategoryAsync()
@@ -205,7 +283,14 @@
 
         Model.StartDate = _startDate.Value;
         Model.EndDate = Model.Frequency == Frequency.Once ? null : _endDate;
-        await Ledger.SaveBillAsync(Model);
-        MudDialog.Close(DialogResult.Ok(Model.Id));
+        try
+        {
+            await Ledger.SaveBillAsync(Model);
+            MudDialog.Close(DialogResult.Ok(Model.Id));
+        }
+        catch (LedgerValidationException ex)
+        {
+            _error = ex.Message;
+        }
     }
 }

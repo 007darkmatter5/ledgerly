@@ -3,7 +3,16 @@
 <MudDialog>
     <TitleContent>
         <MudText Typo="Typo.h6">@Due.Bill.Name</MudText>
-        <MudText Typo="Typo.body2" Class="mud-text-secondary">Due @Display.Date(Due.DueDate) · expected @Due.Bill.ExpectedAmount.ToString("C")@(Due.Bill.MaxAmount is { } max && Due.Bill.IsVariable ? $" – {max:C}" : "")</MudText>
+        <MudText Typo="Typo.body2" Class="mud-text-secondary">
+            @if (Due.Bill.CardAccountId is not null)
+            {
+                <text>Due @Display.Date(Due.DueDate) · @Display.Of(Due.Bill.CardPaymentRule).ToLowerInvariant(), estimated @Due.Amount.ToString("C")</text>
+            }
+            else
+            {
+                <text>Due @Display.Date(Due.DueDate) · expected @Due.Bill.ExpectedAmount.ToString("C")@(Due.Bill.MaxAmount is { } max && Due.Bill.IsVariable ? $" – {max:C}" : "")</text>
+            }
+        </MudText>
     </TitleContent>
     <DialogContent>
         <MudGrid Spacing="2">

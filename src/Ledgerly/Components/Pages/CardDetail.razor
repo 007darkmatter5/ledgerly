@@ -1,0 +1,332 @@
+@page "/cards/{Id:int}"
+@inject LedgerService Ledger
+@inject IDialogService Dialogs
+@inject ISnackbar Snackbar
+
+<PageTitle>@(_card?.Name ?? "Credit card") · Ledgerly</PageTitle>
+
+<MudBreadcrumbs Items="_breadcrumbs" Class="px-0 pt-0" />
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+    return;
+}
+
+@if (_card is null || _simulation is null)
+{
+    <MudAlert Severity="Severity.Warning">That credit card doesn't exist. <MudLink Href="cards">Back to credit cards</MudLink></MudAlert>
+    return;
+}
+
+<MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-4" Wrap="Wrap.Wrap">
+    <MudStack Spacing="0">
+        <MudText Typo="Typo.h4">@_card.Name</MudText>
+        <MudText Typo="Typo.body2" Class="mud-text-secondary">
+            @(_card.CreditLimit is { } limit ? $"{limit:C0} limit" : "No limit set")
+            · @(_card.AprPercent is { } apr ? $"{apr:0.##}% APR" : "no APR set")
+            · statement closes on day @_statementDay@(_card.StatementDay is null ? " (estimated)" : "")
+            @(_card.IsActive ? "" : " · Inactive")
+        </MudText>
+    </MudStack>
+    <MudSpacer />
+    <MudStack Row="true" Spacing="2" Wrap="Wrap.Wrap">
+        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.ShowChart" Href="@($"projection?accounts={_card.Id}")">Running balance</MudButton>
+        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Edit" OnClick="EditCardAsync">Edit card</MudButton>
+    </MudStack>
+</MudStack>
+
+<MudGrid Spacing="3" Class="mb-1">
+    <MudItem xs="12" sm="6" md="3">
+        <StatCard Label="Owed now" Icon="@Icons.Material.Filled.CreditCard">
+            <Value>@_owedNow.ToString("C")</Value>
+            <Caption>@(_owedNow == CreditCards.Owed(_card) ? $"as of {Display.Date(_card.BalanceAsOf)}" : $"{CreditCards.Owed(_card):C} on {_card.BalanceAsOf:MMM d}, plus activity since")</Caption>
+        </StatCard>
+    </MudItem>
+    <MudItem xs="12" sm="6" md="3">
+        <StatCard Label="Available credit" Icon="@Icons.Material.Filled.AccountBalanceWallet">
+            <Value>@(_card.CreditLimit is { } cardLimit ? Math.Max(0, cardLimit - _owedNow).ToString("C") : "—")</Value>
+            <Caption>@(_card.CreditLimit is null ? "Set a credit limit to see this" : "")</Caption>
+        </StatCard>
+    </MudItem>
+    <MudItem xs="12" sm="6" md="3">
+        @{
+            var utilization = CreditCards.Utilization(_card, _owedNow);
+        }
+        <StatCard Label="Credit used" Icon="@Icons.Material.Filled.DataUsage" IconColor="@(utilization is { } u ? CreditCardsPage.UtilizationColor(u) : Color.Default)">
+            <Value>@(utilization?.ToString("P0") ?? "—")</Value>
+            <Caption>@(utilization is null ? "Needs a credit limit" : utilization < 0.3m ? "Under 30% is best for your credit score" : "Over 30% can lower your credit score")</Caption>
+        </StatCard>
+    </MudItem>
+    <MudItem xs="12" sm="6" md="3">
+        <StatCard Label="Next payment" Icon="@Icons.Material.Filled.Payments">
+            <Value>@(_nextPayment is { } next ? (-next.Amount).ToString("C") : "—")</Value>
+            <Caption>@(_nextPayment is { } due ? $"{Display.ShortDate(due.Date)} · {Display.Of(due.Bill!.CardPaymentRule).ToLowerInvariant()}" : "No payment set up")</Caption>
+        </StatCard>
+    </MudItem>
+</MudGrid>
+
+@if (_card.StatementDay is null)
+{
+    <MudAlert Severity="Severity.Info" Class="mb-3" Dense="true">
+        Set the day the statement closes (<MudLink OnClick="EditCardAsync">Edit card</MudLink>) for accurate statement and payment estimates.
+    </MudAlert>
+}
+@if (_payoff is { } payoff && _mainPayment is { } main)
+{
+    <MudAlert Severity="@(payoff.NeverPaysOff ? Severity.Error : Severity.Info)" Class="mb-3" Dense="true">
+        @if (payoff.NeverPaysOff)
+        {
+            <text>At @Display.Of(main.CardPaymentRule).ToLowerInvariant()@(main.CardPaymentRule == CardPaymentRule.FixedAmount ? $" ({main.ExpectedAmount:C})" : ""), the payment doesn't cover the interest, so this balance would never be paid off.</text>
+        }
+        else
+        {
+            <text>
+                Carrying a balance: if you stopped using this card and kept paying @(main.CardPaymentRule == CardPaymentRule.Minimum ? "the minimum each month" : $"{main.ExpectedAmount:C} a month"),
+                it would be paid off in <strong>@Display.Months(payoff.Months)</strong> (@payoff.PayoffDate?.ToString("MMM yyyy")) with about <strong>@payoff.TotalInterest.ToString("C")</strong> in interest.
+            </text>
+        }
+    </MudAlert>
+}
+
+<MudGrid Spacing="3">
+    <MudItem xs="12" md="8">
+        <MudPaper Elevation="1" Class="pa-4 mb-3">
+            <MudText Typo="Typo.subtitle1">Balance over the next 6 months</MudText>
+            <MudChart T="double" ChartType="ChartType.Line" ChartSeries="_series" ChartLabels="_labels" ChartOptions="_chartOptions" Height="260px" Width="100%" />
+        </MudPaper>
+
+        <MudPaper Elevation="1">
+            <MudText Typo="Typo.subtitle1" Class="px-4 pt-3">Upcoming statements</MudText>
+            <MudTable Items="_statements" Dense="true" Hover="true" Elevation="0" Breakpoint="Breakpoint.Sm">
+                <HeaderContent>
+                    <MudTh>Closes</MudTh>
+                    <MudTh Style="text-align:right">New charges</MudTh>
+                    <MudTh Style="text-align:right">Interest</MudTh>
+                    <MudTh Style="text-align:right">Statement</MudTh>
+                    <MudTh Style="text-align:right">Minimum</MudTh>
+                    <MudTh Style="text-align:right">Payment</MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    <MudTd DataLabel="Closes">@Display.ShortDate(context.Statement.ClosingDate)</MudTd>
+                    <MudTd DataLabel="New charges" Style="text-align:right">@context.Statement.Charges.ToString("C")</MudTd>
+                    <MudTd DataLabel="Interest" Style="text-align:right" Class="@(context.Statement.Interest > 0 ? "mud-error-text" : null)">@context.Statement.Interest.ToString("C")</MudTd>
+                    <MudTd DataLabel="Statement" Style="text-align:right"><strong>@context.Statement.Balance.ToString("C")</strong></MudTd>
+                    <MudTd DataLabel="Minimum" Style="text-align:right">@context.Statement.MinimumPayment.ToString("C")</MudTd>
+                    <MudTd DataLabel="Payment" Style="text-align:right">
+                        @if (context.Paid > 0)
+                        {
+                            <span>@context.Paid.ToString("C")</span>
+                            <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">@(context.DueDate is { } due ? $"due {due:MMM d}" : "")</MudText>
+                        }
+                        else
+                        {
+                            <span class="mud-text-secondary">—</span>
+                        }
+                    </MudTd>
+                </RowTemplate>
+                <NoRecordsContent>
+                    <MudText Class="py-4 mud-text-secondary">No statements in the next 6 months.</MudText>
+                </NoRecordsContent>
+            </MudTable>
+            <MudText Typo="Typo.caption" Class="mud-text-secondary d-block px-4 pb-3">
+                Estimates from the bills charged to this card@(_card.MonthlySpending > 0 ? $", {_card.MonthlySpending:C} a month of everyday spending" : "") and interest when a statement isn't paid in full.
+            </MudText>
+        </MudPaper>
+    </MudItem>
+
+    <MudItem xs="12" md="4">
+        <MudPaper Elevation="1" Class="pa-4 mb-3">
+            <MudText Typo="Typo.subtitle1" Class="mb-2">Payments</MudText>
+            @if (_paymentBills.Count == 0)
+            {
+                <MudText Typo="Typo.body2" Class="mud-text-secondary mb-3">
+                    No bill pays this card yet. Set one up so payments come out of your bank account in the running balance.
+                    Already have a payment bill? Edit it and choose this card under "Pays off".
+                </MudText>
+            }
+            @foreach (var bill in _paymentBills)
+            {
+                <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center" Class="mb-2">
+                    <MudStack Spacing="0">
+                        <MudText Typo="Typo.body2">@bill.Name</MudText>
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                            @Display.Of(bill.CardPaymentRule)@(bill.CardPaymentRule == CardPaymentRule.FixedAmount ? $" ({bill.ExpectedAmount:C})" : "")
+                            · @Display.Of(bill.Frequency).ToLowerInvariant() from @(bill.PayFromAccount?.Name ?? "no account")@(bill.AutoPay ? " · autopay" : "")@(bill.IsActive ? "" : " · inactive")
+                        </MudText>
+                    </MudStack>
+                    <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="() => EditBillAsync(bill)" aria-label="@($"Edit {bill.Name}")" />
+                </MudStack>
+            }
+            @if (!_paymentBills.Any(b => b.IsActive))
+            {
+                <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.Add" OnClick="() => EditBillAsync(null)">Set up payment</MudButton>
+            }
+        </MudPaper>
+
+        <MudPaper Elevation="1" Class="pa-4">
+            <MudText Typo="Typo.subtitle1" Class="mb-2">Charged to this card</MudText>
+            @if (_charges.Count == 0 && !(_card.MonthlySpending > 0))
+            {
+                <MudText Typo="Typo.body2" Class="mud-text-secondary">
+                    Nothing yet. Choose this card as a bill's "Paid from" account, or add everyday spending under Edit card.
+                </MudText>
+            }
+            @foreach (var bill in _charges)
+            {
+                <MudStack Row="true" Justify="Justify.SpaceBetween" Class="mb-1">
+                    <MudStack Spacing="0">
+                        <MudText Typo="Typo.body2">@bill.Name</MudText>
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary">@Display.Of(bill.Frequency)@(bill.IsActive ? "" : " · inactive")</MudText>
+                    </MudStack>
+                    <MudText Typo="Typo.body2">@bill.ExpectedAmount.ToString("C")</MudText>
+                </MudStack>
+            }
+            @if (_card.MonthlySpending > 0)
+            {
+                <MudStack Row="true" Justify="Justify.SpaceBetween" Class="mb-1">
+                    <MudStack Spacing="0">
+                        <MudText Typo="Typo.body2">Everyday spending</MudText>
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary">Monthly estimate</MudText>
+                    </MudStack>
+                    <MudText Typo="Typo.body2">@_card.MonthlySpending?.ToString("C")</MudText>
+                </MudStack>
+            }
+            @if (_charges.Count > 0 || _card.MonthlySpending > 0)
+            {
+                <MudDivider Class="my-2" />
+                <MudStack Row="true" Justify="Justify.SpaceBetween">
+                    <MudText Typo="Typo.body2"><strong>About per month</strong></MudText>
+                    <MudText Typo="Typo.body2"><strong>@((_charges.Where(b => b.IsActive).Sum(b => Recurrence.MonthlyEquivalent(b.Frequency, b.ExpectedAmount)) + (_card.MonthlySpending ?? 0)).ToString("C"))</strong></MudText>
+                </MudStack>
+            }
+        </MudPaper>
+    </MudItem>
+</MudGrid>
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    private sealed record StatementRow(CardStatement Statement, decimal Paid, DateOnly? DueDate);
+
+    private bool _loading = true;
+    private Account? _card;
+    private CardSimulation? _simulation;
+    private int _statementDay;
+    private decimal _owedNow;
+    private CardEntry? _nextPayment;
+    private Bill? _mainPayment;
+    private CardPayoff? _payoff;
+    private List<Bill> _paymentBills = [];
+    private List<Bill> _charges = [];
+    private List<StatementRow> _statements = [];
+    private List<BreadcrumbItem> _breadcrumbs = [];
+
+    private List<ChartSeries<double>> _series = [];
+    private string[] _labels = [];
+    private readonly LineChartOptions _chartOptions = new()
+    {
+        YAxisFormat = "C0",
+        MaxNumYAxisTicks = 6,
+        ShowLegend = true,
+        LineStrokeWidth = 2,
+        XAxisLines = false,
+        YAxisLines = true,
+        InterpolationOption = InterpolationOption.Straight
+    };
+
+    protected override Task OnParametersSetAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        var today = Ledger.Today;
+        _card = (await Ledger.GetAccountsAsync()).FirstOrDefault(a => a.Id == Id && a.IsCreditCard);
+        _breadcrumbs = [new("Credit cards", "cards"), new(_card?.Name ?? "Not found", null, disabled: true)];
+        if (_card is null)
+        {
+            _loading = false;
+            return;
+        }
+
+        var bills = await Ledger.GetBillsAsync();
+        _paymentBills = bills.Where(b => b.CardAccountId == _card.Id).OrderBy(b => !b.IsActive).ThenBy(b => b.Name).ToList();
+        _charges = bills.Where(b => b.PayFromAccountId == _card.Id).OrderBy(b => !b.IsActive).ThenBy(b => b.Name).ToList();
+        _statementDay = CreditCards.StatementDay(_card, bills);
+
+        var through = today.AddMonths(6);
+        _simulation = CreditCards.Simulate(_card, bills, through);
+        _owedNow = _simulation.OwedOn(today);
+        _nextPayment = _simulation.Entries.FirstOrDefault(e => e.Kind == CardEntryKind.Payment && e.Date >= today);
+
+        _mainPayment = _paymentBills.FirstOrDefault(b => b.IsActive);
+        _payoff = _mainPayment is { CardPaymentRule: not CardPaymentRule.StatementBalance } && _owedNow > 0 && _card.AprPercent > 0
+            ? CreditCards.PayoffIfNoNewCharges(_card, _mainPayment.CardPaymentRule, _mainPayment.ExpectedAmount, today)
+            : null;
+
+        var statements = _simulation.Statements.Where(s => s.ClosingDate >= today).ToList();
+        _statements = statements.Select((s, i) =>
+        {
+            var nextClose = i + 1 < statements.Count ? statements[i + 1].ClosingDate : through;
+            var payments = _simulation.Entries.Where(e => e.Kind == CardEntryKind.Payment && e.Date > s.ClosingDate && e.Date <= nextClose).ToList();
+            return new StatementRow(s, -payments.Sum(p => p.Amount), payments.FirstOrDefault()?.DueDate);
+        }).ToList();
+
+        BuildChart(today, through);
+        _loading = false;
+    }
+
+    private void BuildChart(DateOnly from, DateOnly through)
+    {
+        var days = through.DayNumber - from.DayNumber + 1;
+        var labelEvery = 30;
+        var owed = new double[days];
+        var labels = new string[days];
+        for (var day = 0; day < days; day++)
+        {
+            var date = from.AddDays(day);
+            owed[day] = (double)_simulation!.OwedOn(date);
+            labels[day] = day % labelEvery == 0 ? date.ToString("MMM d") : "";
+        }
+
+        _labels = labels;
+        _series = [new ChartSeries<double> { Name = "Owed", Data = owed }];
+        // The limit line would flatten the chart when little of it is used, so only show it once the balance gets close.
+        if (_card!.CreditLimit is { } limit && owed.DefaultIfEmpty().Max() >= (double)limit / 2)
+            _series.Add(new ChartSeries<double> { Name = "Credit limit", Data = Enumerable.Repeat((double)limit, days).ToArray() });
+    }
+
+    private async Task EditCardAsync()
+    {
+        var parameters = new DialogParameters<AccountDialog> { { d => d.Model, _card!.Copy() } };
+        var dialog = await Dialogs.ShowAsync<AccountDialog>("Edit credit card", parameters, new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true });
+        if (await dialog.Result is { Canceled: false })
+        {
+            Snackbar.Add("Card saved", Severity.Success);
+            await LoadAsync();
+        }
+    }
+
+    private async Task EditBillAsync(Bill? bill)
+    {
+        var model = bill?.Copy() ?? new Bill
+        {
+            Name = $"{_card!.Name} payment",
+            CardAccountId = _card.Id,
+            CardPaymentRule = CardPaymentRule.StatementBalance
+        };
+        // A payment is usually due about 25 days after the statement closes.
+        var nextClose = CreditCards.ClosingDates(_statementDay, Ledger.Today.AddDays(-1), Ledger.Today.AddMonths(2)).First();
+        var parameters = new DialogParameters<BillDialog>
+        {
+            { d => d.Model, model },
+            { d => d.SuggestedStartDate, nextClose.AddDays(25) }
+        };
+        var dialog = await Dialogs.ShowAsync<BillDialog>(bill is null ? "Set up card payment" : "Edit bill", parameters,
+            new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true });
+        if (await dialog.Result is { Canceled: false })
+        {
+            Snackbar.Add("Payment saved", Severity.Success);
+            await LoadAsync();
+        }
+    }
+}

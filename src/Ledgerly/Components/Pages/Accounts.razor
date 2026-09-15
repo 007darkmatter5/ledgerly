@@ -30,7 +30,14 @@
                 <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
                     <MudIcon Icon="@Display.Icon(context.Type)" Size="Size.Small" Color="Color.Primary" />
                     <MudStack Spacing="0">
-                        <MudText Typo="Typo.body1" Class="@(context.IsActive ? null : "mud-text-disabled")">@context.Name</MudText>
+                        @if (context.IsCreditCard)
+                        {
+                            <MudLink Href="@($"cards/{context.Id}")" Typo="Typo.body1" Class="@(context.IsActive ? null : "mud-text-disabled")">@context.Name</MudLink>
+                        }
+                        else
+                        {
+                            <MudText Typo="Typo.body1" Class="@(context.IsActive ? null : "mud-text-disabled")">@context.Name</MudText>
+                        }
                         @if (!context.IsActive)
                         {
                             <MudText Typo="Typo.caption">Inactive</MudText>
@@ -39,7 +46,13 @@
                 </MudStack>
             </MudTd>
             <MudTd DataLabel="Type">@Display.Of(context.Type)</MudTd>
-            <MudTd DataLabel="Balance" Style="text-align:right"><Money Value="context.Balance" /></MudTd>
+            <MudTd DataLabel="Balance" Style="text-align:right">
+                <Money Value="context.Balance" />
+                @if (context.IsCreditCard)
+                {
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">owed@(context.CreditLimit is { } limit ? $" of {limit:C0}" : "")</MudText>
+                }
+            </MudTd>
             <MudTd DataLabel="As of">@Display.Date(context.BalanceAsOf)</MudTd>
             <MudTd DataLabel="Low balance warning" Style="text-align:right">@context.LowBalanceThreshold?.ToString("C")</MudTd>
             <MudTd DataLabel="Bills / month" Style="text-align:right">@MonthlyBills(context.Id).ToString("C")</MudTd>
