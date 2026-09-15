@@ -30,6 +30,7 @@ dotnet ef migrations add <Name> --project src/Ledgerly --output-dir Data/Migrati
 - In the Dockerfile, restore only after `COPY src/`. A csproj-only restore layer silently drops Blazor's framework assets (`_framework/blazor.web.js`), so pages render but nothing interactive works; the publish step asserts the file exists.
 - The release workflow's `Browser test` step runs `tests/e2e/interactivity.mjs` (Playwright) against the built image with Unraid settings: it signs up and checks the theme toggle and account menu respond. Extend it when adding features that only work interactively.
 - Unraid: `deploy/unraid/docker-compose.yml` (Compose Manager plugin) is a single service with `PUID=99`/`PGID=100` and `/etc/localtime` mounted. Don't add init/sidecar containers: stopped one-shot services show as unhealthy in Unraid. The release workflow smoke-tests the image three ways (root-owned folders + PUID/PGID, defaults, `--user`) before publishing.
+- Unraid Community Apps lists Production from `main`: `ca_profile.xml` (repo root) and `templates/ledgerly.xml`, with the icon and screenshots in `docs/images` referenced by raw `main` URLs. CA re-reads the template from `main`, so keep its paths, ports and variables in step with the Dockerfile. Changes to those files, docs and `LICENSE` don't trigger a release (`paths-ignore`).
 - Culture is fixed in `Program.cs` (`Ledgerly:Culture`, default en-US) via `DefaultThreadCurrentCulture` + request localization, because containers have no `LANG` and would format money with the invariant culture (`¤`).
 
 ## Architecture

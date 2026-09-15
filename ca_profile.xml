@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<CommunityApplications>
+  <Profile>
+**Ledgerly** is a self-hosted personal finance app: bills and due dates, which account pays them, projected running balances, and loans with amortization tables. Each user's data is private.
+
+This repository publishes the Production release of Ledgerly for Unraid. For help or bug reports, open an issue at https://github.com/007darkmatter5/ledgerly/issues.
+  </Profile>
+  <Icon>https://raw.githubusercontent.com/007darkmatter5/ledgerly/main/docs/images/icon.png</Icon>
+  <WebPage>https://github.com/007darkmatter5/ledgerly</WebPage>
+</CommunityApplications>
