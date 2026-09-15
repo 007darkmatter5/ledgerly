@@ -218,6 +218,33 @@ public sealed class LedgerServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Marking_bills_paid_in_bulk_keeps_recorded_details_and_only_touches_own_bills()
+    {
+        var alice = ServiceFor("alice");
+        var today = alice.Today;
+        var rent = new Bill { Name = "Rent", ExpectedAmount = 1200m, StartDate = today.AddMonths(-3) };
+        var water = new Bill { Name = "Water", ExpectedAmount = 30m, StartDate = today.AddMonths(-3) };
+        await alice.SaveBillAsync(rent);
+        await alice.SaveBillAsync(water);
+        var dueRent = today.AddMonths(-1);
+        var alreadyPaid = today.AddMonths(-2);
+        await alice.RecordOccurrenceAsync(rent.Id, dueRent, 1250m, null, "Includes late fee");
+        await alice.RecordOccurrenceAsync(rent.Id, alreadyPaid, null, alreadyPaid.AddDays(3));
+
+        await alice.MarkPaidAsync([(rent.Id, dueRent), (rent.Id, alreadyPaid), (water.Id, dueRent), (water.Id, dueRent)]);
+
+        var bills = await alice.GetBillsAsync();
+        var marked = bills.Single(b => b.Name == "Rent").Occurrences.Single(o => o.DueDate == dueRent);
+        Assert.Equal((dueRent, 1250m, "Includes late fee"), (marked.PaidOn!.Value, marked.Amount!.Value, marked.Notes!));
+        Assert.Equal(alreadyPaid.AddDays(3), bills.Single(b => b.Name == "Rent").Occurrences.Single(o => o.DueDate == alreadyPaid).PaidOn);
+        Assert.Equal(dueRent, Assert.Single(bills.Single(b => b.Name == "Water").Occurrences).PaidOn);
+
+        var bob = ServiceFor("bob");
+        await Assert.ThrowsAsync<InvalidOperationException>(() => bob.MarkPaidAsync([(water.Id, today)]));
+        Assert.Single((await alice.GetBillsAsync()).Single(b => b.Name == "Water").Occurrences);
+    }
+
+    [Fact]
     public async Task Categories_are_private_unique_per_ledger_and_trimmed()
     {
         var alice = ServiceFor("alice");

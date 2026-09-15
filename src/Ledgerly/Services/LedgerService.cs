@@ -267,6 +267,34 @@ public class LedgerService(IDbContextFactory<LedgerlyDbContext> dbFactory, ICurr
     }
 
     /// <summary>
+    /// Marks due dates paid on their due date (or today, if that's earlier), keeping any amount, notes or
+    /// payment type already recorded for them.
+    /// </summary>
+    public async Task MarkPaidAsync(IEnumerable<(int BillId, DateOnly DueDate)> dues)
+    {
+        var list = dues.Distinct().ToList();
+        if (list.Count == 0)
+            return;
+
+        var ledgerId = await LedgerIdAsync();
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var billIds = list.Select(d => d.BillId).Distinct().ToList();
+        var owned = await db.Bills.Where(b => b.LedgerId == ledgerId && billIds.Contains(b.Id)).Select(b => b.Id).ToListAsync();
+        if (billIds.Except(owned).FirstOrDefault() is var missing and not 0)
+            throw new InvalidOperationException($"Bill {missing} was not found.");
+
+        var dueDates = list.Select(d => d.DueDate).Distinct().ToList();
+        var existing = await db.BillOccurrences.Where(o => billIds.Contains(o.BillId) && dueDates.Contains(o.DueDate)).ToListAsync();
+        foreach (var (billId, dueDate) in list)
+        {
+            var occurrence = existing.FirstOrDefault(o => o.BillId == billId && o.DueDate == dueDate)
+                ?? db.BillOccurrences.Add(new BillOccurrence { BillId = billId, DueDate = dueDate }).Entity;
+            occurrence.PaidOn ??= dueDate < Today ? dueDate : Today;
+        }
+        await db.SaveChangesAsync();
+    }
+
+    /// <summary>
     /// Records an extra principal payment already made on a loan, as a one-time paid bill so it also
     /// appears in the paying account's running balance.
     /// </summary>

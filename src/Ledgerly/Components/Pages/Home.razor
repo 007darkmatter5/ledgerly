@@ -59,7 +59,7 @@ else
             </StatCard>
         </MudItem>
         <MudItem xs="12" sm="6" lg="3">
-            <StatCard Label="Overdue" Icon="@Icons.Material.Filled.Warning" IconColor="@(_overdue.Count > 0 ? Color.Error : Color.Default)">
+            <StatCard Label="Overdue" Icon="@Icons.Material.Filled.Warning" IconColor="@(_overdue.Count > 0 ? Color.Error : Color.Default)" Href="payments">
                 <Value><Money Value="_overdue.Sum(d => d.Amount)" Colored="false" Class="@(_overdue.Count > 0 ? "mud-error-text" : null)" /></Value>
                 <Caption>@(_overdue.Count == 0 ? "You're all caught up" : $"{_overdue.Count} bill{(_overdue.Count == 1 ? "" : "s")} past due")</Caption>
             </StatCard>
