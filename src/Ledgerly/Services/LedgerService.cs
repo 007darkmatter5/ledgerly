@@ -8,12 +8,13 @@ namespace Ledgerly.Services;
 /// Data access for the app, always limited to the signed-in user's active ledger.
 /// Each call uses its own short-lived DbContext.
 /// </summary>
-public class LedgerService(IDbContextFactory<LedgerlyDbContext> dbFactory, ICurrentUser currentUser, TimeProvider clock)
+public class LedgerService(IDbContextFactory<LedgerlyDbContext> dbFactory, ICurrentUser currentUser, TimeProvider clock, DataGeneration? dataGeneration = null)
 {
     private const string MyLedgerName = "My ledger";
     private const string SampleLedgerName = "Sample data";
 
     private Ledger? _activeLedger;
+    private int _activeLedgerGeneration;
 
     public DateOnly Today => DateOnly.FromDateTime(clock.GetLocalNow().DateTime);
 
@@ -22,8 +23,9 @@ public class LedgerService(IDbContextFactory<LedgerlyDbContext> dbFactory, ICurr
     /// <summary>The ledger being viewed. Creates the user's own ledger on first use.</summary>
     public async Task<Ledger> GetActiveLedgerAsync()
     {
-        if (_activeLedger is not null)
+        if (_activeLedger is not null && _activeLedgerGeneration == (dataGeneration?.Value ?? 0))
             return _activeLedger;
+        _activeLedger = null;
 
         var userId = await RequireUserIdAsync();
         await using var db = await dbFactory.CreateDbContextAsync();
@@ -37,7 +39,7 @@ public class LedgerService(IDbContextFactory<LedgerlyDbContext> dbFactory, ICurr
         if (ledger is null)
             await SetActiveLedgerAsync(db, userId, await GetOrCreateLedgerAsync(db, userId, isSample: false));
         else
-            _activeLedger = ledger;
+            (_activeLedger, _activeLedgerGeneration) = (ledger, dataGeneration?.Value ?? 0);
 
         return _activeLedger!;
     }
@@ -433,7 +435,7 @@ public class LedgerService(IDbContextFactory<LedgerlyDbContext> dbFactory, ICurr
     private async Task SetActiveLedgerAsync(LedgerlyDbContext db, string userId, Ledger ledger)
     {
         await db.Users.Where(u => u.Id == userId).ExecuteUpdateAsync(s => s.SetProperty(u => u.ActiveLedgerId, ledger.Id));
-        _activeLedger = ledger;
+        (_activeLedger, _activeLedgerGeneration) = (ledger, dataGeneration?.Value ?? 0);
     }
 
     /// <summary>Rejects references (e.g. a bill's pay-from account) to rows outside the active ledger.</summary>

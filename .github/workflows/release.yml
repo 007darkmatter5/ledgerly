@@ -132,6 +132,8 @@ jobs:
           npm install playwright@1 >/dev/null
           npx playwright install --with-deps chromium >/dev/null
           node interactivity.mjs http://localhost:8080 || { docker logs browser; exit 1; }
+          # The restore saved a copy of the previous database next to it, as the container's user.
+          sudo ls -l ../../browser/data/backups | grep before-restore- || { echo "No pre-restore copy was saved"; docker logs browser; exit 1; }
           docker rm -f browser
 
       - uses: docker/login-action@v4

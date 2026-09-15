@@ -18,15 +18,16 @@ public static class PaymentHistory
 {
     /// <summary>
     /// Payments dated <paramref name="from"/> through <paramref name="to"/>, newest first. Marked payments count
-    /// by the date paid, including bills that are now inactive. With <paramref name="includeAutopay"/>, unmarked
-    /// autopay due dates of active bills up to <paramref name="today"/> count as paid on their due date.
+    /// by the date paid, including bills that are now inactive, plus payments made ahead of the period for due
+    /// dates inside it. With <paramref name="includeAutopay"/>, unmarked autopay due dates of active bills up to
+    /// <paramref name="today"/> count as paid on their due date.
     /// </summary>
     public static List<PaymentRecord> Between(IEnumerable<Bill> bills, DateOnly from, DateOnly to, DateOnly today, bool includeAutopay = true)
     {
         var billList = bills.ToList();
         var records = billList
             .SelectMany(b => b.Occurrences
-                .Where(o => o.PaidOn is { } paid && paid >= from && paid <= to)
+                .Where(o => o.PaidOn is { } paid && ((paid >= from && paid <= to) || (paid < from && o.DueDate >= from && o.DueDate <= to)))
                 .Select(o => new PaymentRecord(b, o.DueDate, o.PaidOn!.Value, o.Amount ?? b.ExpectedAmount, o)))
             .ToList();
 
@@ -49,6 +50,13 @@ public static class PaymentHistory
         BillSchedule.Between(bills, from, Min(to, today))
             .Where(d => d.IsOverdue(today) || (d.DueDate == today && !d.IsPaid && !d.Bill.AutoPay))
             .ToList();
+
+    /// <summary>Unpaid due dates after <paramref name="today"/> through <paramref name="to"/>, including autopay, soonest first.</summary>
+    public static List<BillDue> ComingUp(IEnumerable<Bill> bills, DateOnly from, DateOnly to, DateOnly today)
+    {
+        var start = from > today ? from : today.AddDays(1);
+        return start > to ? [] : BillSchedule.Between(bills, start, to).Where(d => !d.IsPaid).ToList();
+    }
 
     private static DateOnly Min(DateOnly a, DateOnly b) => a < b ? a : b;
 }

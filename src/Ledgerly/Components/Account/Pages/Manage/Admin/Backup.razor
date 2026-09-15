@@ -1,0 +1,68 @@
+@page "/Account/Manage/Admin/Backup"
+
+@using Ledgerly.Services.Backup
+@using Microsoft.EntityFrameworkCore
+
+@inject IDbContextFactory<LedgerlyDbContext> DbFactory
+@inject AppInfo App
+
+<PageTitle>Backup &amp; restore · Ledgerly</PageTitle>
+
+<h2 class="acct-subtitle">Backup &amp; restore</h2>
+<p class="acct-lead">
+    Move Ledgerly to another server, or keep a copy of everything. A backup holds every account, ledger and setting in this install.
+</p>
+<StatusMessage />
+
+<dl class="acct-summary">
+    <dt>This install</dt><dd>Ledgerly @App.Version (@App.Channel)</dd>
+    <dt>Accounts</dt><dd>@users</dd>
+    <dt>Ledgers</dt><dd>@ledgers@(sampleLedgers > 0 ? $", plus {sampleLedgers} with sample data" : "")</dd>
+</dl>
+
+<h3 class="acct-section">Download a backup</h3>
+<p class="acct-lead">
+    Includes all users with their passwords and two-factor settings, all financial data, and the admin settings, including the email
+    server password. Keep the file somewhere safe: anyone who has it can read everything in it.
+</p>
+<a href="Account/Manage/Admin/Backup/Download" class="acct-btn acct-btn-primary">Download backup</a>
+
+<h3 class="acct-section">Restore a backup</h3>
+<div class="acct-alert acct-alert-warning" role="alert">
+    <strong>Restoring replaces everything in this install</strong> with the backup's accounts, data and settings. Everyone is signed out,
+    and you sign back in with an account from the backup.
+</div>
+<ul class="acct-lead">
+    <li>A copy of the current data is saved first, in the <code>backups</code> folder next to the database (the last 5 are kept).</li>
+    <li>Backups from an older version of Ledgerly are upgraded. A backup from a newer version is refused, so update this install first. A Beta backup can be newer than Production.</li>
+    <li>Settings that come from environment variables, like the port or email configuration, aren't part of the backup.</li>
+</ul>
+
+<form method="post" action="Account/Manage/Admin/Backup/Restore" enctype="multipart/form-data" class="acct-form">
+    <AntiforgeryToken />
+    <div class="acct-field">
+        <label for="backup-file">Backup file</label>
+        <input type="file" id="backup-file" name="file" accept=".zip,application/zip" class="acct-input" required />
+    </div>
+    <label class="acct-check">
+        <input type="checkbox" name="confirm" required />
+        I understand this replaces all accounts and data in this install
+    </label>
+    <div class="acct-actions">
+        <button type="submit" class="acct-btn acct-btn-danger">Restore backup</button>
+    </div>
+</form>
+
+@code {
+    private int users;
+    private int ledgers;
+    private int sampleLedgers;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        users = await db.Users.CountAsync();
+        ledgers = await db.Ledgers.CountAsync(l => !l.IsSample);
+        sampleLedgers = await db.Ledgers.CountAsync(l => l.IsSample);
+    }
+}

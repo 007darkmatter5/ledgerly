@@ -59,66 +59,44 @@
 }
 
 <MudGrid Spacing="3" Class="mb-1">
-    <MudItem xs="12" sm="4">
+    <MudItem xs="12" sm="@(ShowsFuture ? 6 : 4)" md="@(ShowsFuture ? 3 : 4)">
         <StatCard Label="Paid" Icon="@Icons.Material.Filled.TaskAlt" IconColor="Color.Success">
             <Value><Money Value="_history.Sum(p => p.Amount)" Colored="false" /></Value>
             <Caption>@Plural(_history.Count, "payment") · @(From.ToString("MMM d")) – @(To.ToString("MMM d, yyyy"))</Caption>
         </StatCard>
     </MudItem>
-    <MudItem xs="12" sm="4">
+    <MudItem xs="12" sm="@(ShowsFuture ? 6 : 4)" md="@(ShowsFuture ? 3 : 4)">
         <StatCard Label="Autopay" Icon="@Icons.Material.Filled.Autorenew" IconColor="Color.Info">
             <Value><Money Value="_history.Where(p => p.Bill.AutoPay || p.IsAssumed).Sum(p => p.Amount)" Colored="false" /></Value>
             <Caption>@(_includeAutopay ? $"{Plural(_history.Count(p => p.IsAssumed), "payment")} not marked, counted on due date" : "Only autopay bills marked paid")</Caption>
         </StatCard>
     </MudItem>
-    <MudItem xs="12" sm="4">
+    <MudItem xs="12" sm="@(ShowsFuture ? 6 : 4)" md="@(ShowsFuture ? 3 : 4)">
         <StatCard Label="Not marked paid" Icon="@Icons.Material.Filled.PendingActions" IconColor="@(_notMarked.Count > 0 ? Color.Warning : Color.Default)">
             <Value><Money Value="_notMarked.Sum(d => d.Amount)" Colored="false" /></Value>
-            <Caption>@(_notMarked.Count == 0 ? "Everything due is marked paid" : $"{Plural(_notMarked.Count, "bill")} due and not marked paid")</Caption>
+            <Caption>@(_notMarked.Count == 0 ? (From > Today ? "Nothing due yet" : "Everything due is marked paid") : $"{Plural(_notMarked.Count, "bill")} due and not marked paid")</Caption>
         </StatCard>
     </MudItem>
+    @if (ShowsFuture)
+    {
+        <MudItem xs="12" sm="6" md="3">
+            <StatCard Label="Coming up" Icon="@Icons.Material.Filled.Event" IconColor="Color.Primary">
+                <Value><Money Value="_comingUp.Sum(d => d.Amount)" Colored="false" /></Value>
+                <Caption>@(_comingUp.Count == 0 ? "Nothing else due in this period" : $"{Plural(_comingUp.Count, "bill")} still to pay by {To:MMM d}")</Caption>
+            </StatCard>
+        </MudItem>
+    }
 </MudGrid>
 
 @if (_notMarked.Count > 0)
 {
-    <MudPaper Elevation="1" Class="mb-3">
-        <MudStack Row="true" AlignItems="AlignItems.Center" Class="px-4 pt-3" Wrap="Wrap.Wrap">
-            <MudStack Spacing="0">
-                <MudText Typo="Typo.h6">Not marked paid</MudText>
-                <MudText Typo="Typo.caption" Class="mud-text-secondary">Select the ones you've paid and mark them all at once. They're recorded as paid on their due dates.</MudText>
-            </MudStack>
-            <MudSpacer />
-            <MudButton Variant="Variant.Filled" Color="Color.Success" StartIcon="@Icons.Material.Filled.DoneAll" Disabled="_selected.Count == 0 || _saving" OnClick="MarkSelectedPaidAsync">
-                Mark @(_selected.Count == 0 ? "selected" : Plural(_selected.Count, "bill")) paid
-            </MudButton>
-        </MudStack>
-        <MudTable T="BillDue" Items="_notMarked" MultiSelection="true" @bind-SelectedItems="_selected" Dense="true" Hover="true" Elevation="0" Breakpoint="Breakpoint.Sm">
-            <HeaderContent>
-                <MudTh>Due</MudTh>
-                <MudTh>Bill</MudTh>
-                <MudTh>Paid from</MudTh>
-                <MudTh Style="text-align:right">Amount</MudTh>
-                <MudTh></MudTh>
-            </HeaderContent>
-            <RowTemplate>
-                <MudTd DataLabel="Due">
-                    <MudText Typo="Typo.body2">@Display.ShortDate(context.DueDate)</MudText>
-                    <MudText Typo="Typo.caption" Class="@(context.DueDate < Ledger.Today ? "mud-error-text" : "mud-text-secondary")">@Display.Relative(context.DueDate, Ledger.Today)</MudText>
-                </MudTd>
-                <MudTd DataLabel="Bill">
-                    <MudText Typo="Typo.body2">@context.Bill.Name</MudText>
-                    <MudText Typo="Typo.caption" Class="mud-text-secondary">@(context.Bill.Payee?.Name ?? context.Bill.Loan?.Lender?.Name)</MudText>
-                </MudTd>
-                <MudTd DataLabel="Paid from">@(context.Bill.PayFromAccount?.Name ?? "Not assigned")</MudTd>
-                <MudTd DataLabel="Amount" Style="text-align:right; white-space:nowrap">@(context.IsEstimate ? "≈ " : "")@context.Amount.ToString("C")</MudTd>
-                <MudTd Style="text-align:right; white-space:nowrap">
-                    <MudTooltip Text="Mark paid with a different amount or date">
-                        <MudIconButton Icon="@Icons.Material.Filled.EditNote" Size="Size.Small" OnClick="() => OpenAsync(context, markPaid: true)" aria-label="@($"Mark {context.Bill.Name} paid")" />
-                    </MudTooltip>
-                </MudTd>
-            </RowTemplate>
-        </MudTable>
-    </MudPaper>
+    @DueTable(_notMarked, _selectedPast, selected => _selectedPast = selected, "Not marked paid",
+        "Select the ones you've paid and mark them all at once. They're recorded as paid on their due dates.")
+}
+@if (_comingUp.Count > 0)
+{
+    @DueTable(_comingUp, _selectedUpcoming, selected => _selectedUpcoming = selected, "Coming up",
+        "Bills still to pay in this period. Paid one early? Select it and mark it paid, and it's recorded as paid today.")
 }
 
 <MudGrid Spacing="3">
@@ -220,7 +198,7 @@
 </MudGrid>
 
 @code {
-    private enum Period { ThisMonth, LastMonth, Last3Months, ThisYear, LastYear }
+    private enum Period { ThisMonth, NextMonth, Next3Months, LastMonth, Last3Months, ThisYear, LastYear }
 
     private bool _loading = true;
     private bool _saving;
@@ -230,7 +208,9 @@
     private List<Payee> _payees = [];
     private List<PaymentRecord> _history = [];
     private List<BillDue> _notMarked = [];
-    private HashSet<BillDue> _selected = [];
+    private List<BillDue> _comingUp = [];
+    private HashSet<BillDue> _selectedPast = [];
+    private HashSet<BillDue> _selectedUpcoming = [];
 
     private Period _period = Period.ThisMonth;
     private int? _accountFilter;
@@ -249,6 +229,7 @@
     private DateOnly From => _period switch
     {
         Period.ThisMonth => MonthStart,
+        Period.NextMonth or Period.Next3Months => MonthStart.AddMonths(1),
         Period.LastMonth => MonthStart.AddMonths(-1),
         Period.Last3Months => MonthStart.AddMonths(-2),
         Period.ThisYear => new DateOnly(Today.Year, 1, 1),
@@ -257,14 +238,22 @@
 
     private DateOnly To => _period switch
     {
+        Period.ThisMonth => MonthStart.AddMonths(1).AddDays(-1),
+        Period.NextMonth => MonthStart.AddMonths(2).AddDays(-1),
+        Period.Next3Months => MonthStart.AddMonths(4).AddDays(-1),
         Period.LastMonth => MonthStart.AddDays(-1),
         Period.LastYear => new DateOnly(Today.Year - 1, 12, 31),
         _ => Today
     };
 
+    /// <summary>The period includes days after today, so there may be bills coming up.</summary>
+    private bool ShowsFuture => To > Today;
+
     private static string Describe(Period period) => period switch
     {
         Period.ThisMonth => "This month",
+        Period.NextMonth => "Next month",
+        Period.Next3Months => "Next 3 months",
         Period.LastMonth => "Last month",
         Period.Last3Months => "Last 3 months",
         Period.ThisYear => "This year",
@@ -297,7 +286,9 @@
 
         _history = PaymentHistory.Between(bills, From, To, Today, _includeAutopay);
         _notMarked = PaymentHistory.NotMarkedPaid(bills, From, To, Today);
-        _selected = [];
+        _comingUp = PaymentHistory.ComingUp(bills, From, To, Today);
+        _selectedPast = [];
+        _selectedUpcoming = [];
     }
 
     private void OnPeriodChanged(Period period) { _period = period; Recalculate(); }
@@ -306,13 +297,59 @@
     private void OnPayeeChanged(int? id) { _payeeFilter = id; Recalculate(); }
     private void OnIncludeAutopayChanged(bool include) { _includeAutopay = include; Recalculate(); }
 
-    private async Task MarkSelectedPaidAsync()
+    /// <summary>A list of due dates that can be selected and marked paid together.</summary>
+    private RenderFragment DueTable(List<BillDue> items, HashSet<BillDue> selected, Action<HashSet<BillDue>> setSelected, string title, string caption) => @<MudPaper Elevation="1" Class="mb-3">
+        <MudStack Row="true" AlignItems="AlignItems.Center" Class="px-4 pt-3" Wrap="Wrap.Wrap">
+            <MudStack Spacing="0">
+                <MudText Typo="Typo.h6">@title</MudText>
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">@caption</MudText>
+            </MudStack>
+            <MudSpacer />
+            <MudButton Variant="Variant.Filled" Color="Color.Success" StartIcon="@Icons.Material.Filled.DoneAll" Disabled="selected.Count == 0 || _saving" OnClick="() => MarkSelectedPaidAsync(selected)">
+                Mark @(selected.Count == 0 ? "selected" : Plural(selected.Count, "bill")) paid
+            </MudButton>
+        </MudStack>
+        <MudTable T="BillDue" Items="items" MultiSelection="true" SelectedItems="selected" SelectedItemsChanged="@(s => setSelected(s))" Dense="true" Hover="true" Elevation="0" Breakpoint="Breakpoint.Sm">
+            <HeaderContent>
+                <MudTh>Due</MudTh>
+                <MudTh>Bill</MudTh>
+                <MudTh>Paid from</MudTh>
+                <MudTh Style="text-align:right">Amount</MudTh>
+                <MudTh></MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd DataLabel="Due">
+                    <MudText Typo="Typo.body2">@Display.ShortDate(context.DueDate)</MudText>
+                    <MudText Typo="Typo.caption" Class="@(context.DueDate < Today ? "mud-error-text" : "mud-text-secondary")">@Display.Relative(context.DueDate, Today)</MudText>
+                </MudTd>
+                <MudTd DataLabel="Bill">
+                    <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center">
+                        <MudText Typo="Typo.body2">@context.Bill.Name</MudText>
+                        @if (context.Bill.AutoPay)
+                        {
+                            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Info">Autopay</MudChip>
+                        }
+                    </MudStack>
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary">@(context.Bill.Payee?.Name ?? context.Bill.Loan?.Lender?.Name)</MudText>
+                </MudTd>
+                <MudTd DataLabel="Paid from">@(context.Bill.PayFromAccount?.Name ?? "Not assigned")</MudTd>
+                <MudTd DataLabel="Amount" Style="text-align:right; white-space:nowrap">@(context.IsEstimate ? "≈ " : "")@context.Amount.ToString("C")</MudTd>
+                <MudTd Style="text-align:right; white-space:nowrap">
+                    <MudTooltip Text="Mark paid with a different amount or date">
+                        <MudIconButton Icon="@Icons.Material.Filled.EditNote" Size="Size.Small" OnClick="() => OpenAsync(context, markPaid: true)" aria-label="@($"Mark {context.Bill.Name} paid")" />
+                    </MudTooltip>
+                </MudTd>
+            </RowTemplate>
+        </MudTable>
+    </MudPaper>;
+
+    private async Task MarkSelectedPaidAsync(HashSet<BillDue> selected)
     {
         _saving = true;
         try
         {
-            var count = _selected.Count;
-            await Ledger.MarkPaidAsync(_selected.Select(d => (d.Bill.Id, d.DueDate)));
+            var count = selected.Count;
+            await Ledger.MarkPaidAsync(selected.Select(d => (d.Bill.Id, d.DueDate)));
             Snackbar.Add($"Marked {Plural(count, "bill")} paid", Severity.Success);
             await LoadAsync();
         }

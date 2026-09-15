@@ -80,10 +80,27 @@ The first account created is Ledgerly's **admin**. (If accounts already existed 
 
 - **Email server**: set up email for password resets.
 - **Users & sign-ups**: turn new sign-ups on or off, and make other accounts admins.
+- **Backup & restore**: download everything in the install, or restore a backup (see [Moving to another server](#moving-to-another-server)).
 
-Admins can't see anyone else's bills, accounts or loans. There's always at least one admin: the last admin can't be removed or delete their account until someone else is made an admin.
+Admins can't see anyone else's bills, accounts or loans in the app. A backup file, though, contains every user's data, so only make people admins you'd trust with it. There's always at least one admin: the last admin can't be removed or delete their account until someone else is made an admin.
 
 **Tip for a household install:** once everyone who needs an account has created one, turn off new sign-ups.
+
+## Moving to another server
+
+Use **account menu → Account settings → Backup & restore** (admins only).
+
+1. On the old install, click **Download backup**. The file holds every account (with passwords and two-factor settings), all bills, accounts, loans and payment history, and the admin settings, including the email server password. Keep it private.
+2. Install Ledgerly on the new server and create an account (it becomes the admin for now).
+3. On the new install, open **Backup & restore**, choose the file, tick the confirmation box and click **Restore backup**. Everything in the new install is replaced, and everyone is signed out.
+4. Sign in with your account from the old install.
+
+Things to know:
+
+- The new install must run the **same or a newer version** than the old one. Older backups are upgraded when restored; a backup from a newer version (for example Beta restored into Production) is refused until you update.
+- Before replacing anything, Ledgerly saves a copy of the current database to `backups/before-restore-<date>.db` next to the database (the last 5 are kept). To undo a restore, restore a backup you downloaded earlier, or stop Ledgerly, delete `ledgerly.db-wal` and `ledgerly.db-shm` if they exist, and copy that file over `ledgerly.db`.
+- Settings from environment variables or `ledgerly.env` (port, culture, reverse proxy, email configuration) aren't in the backup. Set them on the new server.
+- On Unraid (or any Docker host) you can also stop the container and copy the whole appdata folder (`data` and `keys`) to the new server instead.
 
 ## Setting up email
 

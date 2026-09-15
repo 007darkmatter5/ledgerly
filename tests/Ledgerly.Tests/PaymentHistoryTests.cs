@@ -55,6 +55,26 @@ public class PaymentHistoryTests
     }
 
     [Fact]
+    public void Future_periods_show_payments_made_ahead_and_unpaid_due_dates_coming_up()
+    {
+        var rent = Bill("Rent", 1200m, D(7, 1));
+        rent.Occurrences = [new() { DueDate = D(10, 1), PaidOn = D(9, 14) }];
+        var phone = Bill("Phone", 50m, D(7, 20), autoPay: true);
+
+        var history = PaymentHistory.Between([rent, phone], D(10, 1), D(10, 31), Today);
+        var comingUp = PaymentHistory.ComingUp([rent, phone], D(10, 1), D(10, 31), Today);
+
+        var paidAhead = Assert.Single(history);
+        Assert.Equal((D(9, 14), D(10, 1)), (paidAhead.PaidOn, paidAhead.DueDate));
+        Assert.Equal([("Phone", D(10, 20))], comingUp.Select(d => (d.Bill.Name, d.DueDate)));
+
+        // Within the current month, "coming up" starts tomorrow; today's due dates belong to the other lists.
+        Assert.Equal([D(9, 20)], PaymentHistory.ComingUp([phone], D(9, 1), D(9, 30), D(9, 20).AddDays(-5)).Select(d => d.DueDate));
+        Assert.Empty(PaymentHistory.ComingUp([phone], D(9, 1), D(9, 30), D(9, 20)));
+        Assert.Empty(PaymentHistory.ComingUp([phone], D(8, 1), D(8, 31), Today));
+    }
+
+    [Fact]
     public void Inactive_bills_keep_marked_payments_but_add_no_assumed_autopay()
     {
         var gym = Bill("Gym", 40m, D(6, 1), autoPay: true, active: false);

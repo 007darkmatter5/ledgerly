@@ -28,7 +28,7 @@ dotnet ef migrations add <Name> --project src/Ledgerly --output-dir Data/Migrati
 - Servers install/update with `deploy/install.sh <beta|production>` (Docker Compose under `/opt/ledgerly/<channel>`; it writes `.env` and `docker-compose.yml`, never overwrites `ledgerly.env`, backs up the DB before restarting, and waits on `/healthz`). The script is fetched from `main`, so changes to it reach both channels once merged. No Docker on the dev PC: verify image changes through the Actions run (`gh run watch`).
 - Migrations run on container start and can't be rolled back automatically; a rollback means installing the older `--version` and restoring the pre-update backup.
 - In the Dockerfile, restore only after `COPY src/`. A csproj-only restore layer silently drops Blazor's framework assets (`_framework/blazor.web.js`), so pages render but nothing interactive works; the publish step asserts the file exists.
-- The release workflow's `Browser test` step runs `tests/e2e/interactivity.mjs` (Playwright) against the built image with Unraid settings: it signs up and checks the theme toggle and account menu respond. Extend it when adding features that only work interactively.
+- The release workflow's `Browser test` step runs `tests/e2e/interactivity.mjs` (Playwright) against the built image with Unraid settings: it signs up, checks the theme toggle and account menu respond, adds a category and payee, and downloads and restores a backup. Extend it when adding features that only work interactively.
 - Unraid: `deploy/unraid/docker-compose.yml` (Compose Manager plugin) is a single service with `PUID=99`/`PGID=100` and `/etc/localtime` mounted. Don't add init/sidecar containers: stopped one-shot services show as unhealthy in Unraid. The release workflow smoke-tests the image three ways (root-owned folders + PUID/PGID, defaults, `--user`) before publishing.
 - Unraid Community Apps lists Production from `main`: `ca_profile.xml` (repo root) and `templates/ledgerly.xml`, with the icon and screenshots in `docs/images` referenced by raw `main` URLs. CA re-reads the template from `main`, so keep its paths, ports and variables in step with the Dockerfile. Changes to those files, docs and `LICENSE` don't trigger a release (`paths-ignore`).
 - Culture is fixed in `Program.cs` (`Ledgerly:Culture`, default en-US) via `DefaultThreadCurrentCulture` + request localization, because containers have no `LANG` and would format money with the invariant culture (`¤`).
@@ -51,7 +51,7 @@ dotnet ef migrations add <Name> --project src/Ledgerly --output-dir Data/Migrati
 - Every `LedgerService` query and write must filter by the active ledger id, and must also validate referenced ids (a bill's account/loan, an income's account) with `EnsureInLedgerAsync`. Add a case to `LedgerServiceTests` (in-memory SQLite) for any new entity or write path.
 - Ledger and user deletion cascade in the database. Switching ledgers force-reloads the page (`NavigateTo(..., forceLoad: true)`) rather than refreshing components.
 - Sample data (`SampleData`) is opt-in only and lives in the sample ledger; never seed data automatically.
-- Admins manage app settings and roles only; they can't read other users' ledgers.
+- Admins manage app settings and roles only; they can't read other users' ledgers in the app (but can download a whole-install backup, see below).
 
 ## Domain rules
 
@@ -71,6 +71,12 @@ dotnet ef migrations add <Name> --project src/Ledgerly --output-dir Data/Migrati
 - Monthly payments are assumed made on schedule. Only extra principal changes the balance (`LoanPayments`): an extra-kind payment's whole amount, or whatever a monthly payment exceeds its **bill's** expected amount by (so escrow included in the bill isn't counted). Autopay loan bills count on their due dates without being marked paid.
 - `LoanMath` requires the extra payments explicitly (`LoanPayments.ExtrasFor(loan, bills, today)`); pass them everywhere a balance or schedule is displayed. `ActualSchedule` starts from the lender-reported balance (applying only extras after `BalanceAsOf`) or from the original terms.
 - `Amortization.Build(additionalPayments:)` applies each one-off payment after the scheduled payment on or before its date; `AmortizationSchedule.BalanceOn` accounts for its exact date. Payments are rounded to the cent, so the final payment absorbs the residue (e.g. $1,200.14 vs $1,199.10 on 200k/6%/30y).
+
+## Backup & restore
+
+- `Services/Backup/BackupService` makes whole-install backups (admins only, via `Components/Account/BackupEndpoints.cs` and the static `Admin/Backup` page): a zip of `manifest.json`, a `VACUUM INTO` snapshot of the database, and `secrets.json` with the email password decrypted (re-encrypted with the target's Data Protection keys on restore). Data Protection keys aren't included, so sign-in cookies don't carry over.
+- Restore validates the zip and the database (integrity check, Ledgerly tables, no migrations unknown to this build), saves `backups/before-restore-*.db` beside the live database, copies the backup in with SQLite's backup API (no file swapping), runs migrations, then increments `DataGeneration`. `LedgerService` drops its cached active ledger when the generation changes, because restored ledger ids can belong to other users. Any new per-circuit cache of ids must do the same, and new singleton caches must be reset in `RestoreAsync` (like `EmailSettingsStore.Reload`).
+- A backup contains every user's data. It is the one admin feature that exposes other users' ledgers.
 
 ## Auth, admins and email
 

@@ -72,6 +72,37 @@ try {
   const payeeLink = await page.waitForSelector('.mud-table-body a[href="https://power.example.com/"]', { timeout: 5000 }).then(() => true, () => false);
   note(`payee added with website link: ${payeeLink}`);
   if (!payeeLink) { note('FAIL: new payee or its website link did not appear'); failed = true; }
+
+  // Backup & restore: download a backup, add a category afterwards, restore, and check the data is back to the backup's.
+  const download = await page.request.get(`${base}/Account/Manage/Admin/Backup/Download`);
+  note(`backup download: ${download.status()} ${download.headers()['content-type']}`);
+  if (!download.ok()) throw new Error('backup download failed');
+  const fs = await import('node:fs');
+  fs.writeFileSync('backup.zip', await download.body());
+
+  await page.goto(`${base}/categories`);
+  await openDialog('Add category');
+  await page.fill('.mud-dialog input', 'E2E After Backup');
+  await page.click('.mud-dialog button:has-text("Save")');
+  await page.waitForSelector('.mud-table-body >> text=E2E After Backup', { timeout: 5000 });
+
+  await page.goto(`${base}/Account/Manage/Admin/Backup`);
+  await page.setInputFiles('#backup-file', 'backup.zip');
+  await page.check('input[name=confirm]');
+  await page.click('button:has-text("Restore backup")');
+  const restored = await page.waitForSelector('text=Restored the backup', { timeout: 30000 }).then(() => true, () => false);
+  note(`backup restored: ${restored}`);
+  if (!restored) throw new Error(`restore did not finish: ${await page.locator('.acct-alert').allInnerTexts()}`);
+
+  await page.fill('[id="Input.Email"]', 'e2e@example.com');
+  await page.fill('[id="Input.Password"]', 'E2e!Password1');
+  await page.click('button[type=submit]');
+  await page.waitForURL((url) => !url.pathname.includes('/Account/Login'), { timeout: 30000 });
+  await page.goto(`${base}/categories`);
+  await page.waitForSelector('.mud-table-body >> text=E2E Groceries', { timeout: 10000 });
+  const afterBackupGone = await page.locator('.mud-table-body >> text=E2E After Backup').count() === 0;
+  note(`data matches the backup after restore: ${afterBackupGone}`);
+  if (!afterBackupGone) { note('FAIL: the category added after the backup is still there'); failed = true; }
 } catch (e) {
   note(`FAIL: ${e.message}`);
   failed = true;

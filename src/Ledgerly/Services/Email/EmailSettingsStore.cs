@@ -93,6 +93,24 @@ public class EmailSettingsStore(IOptionsMonitor<EmailOptions> configuration, App
         Invalidate();
     }
 
+    /// <summary>Forgets cached settings, e.g. after a restore replaced the database.</summary>
+    public void Reload() => Invalidate();
+
+    /// <summary>The saved password in plain text, for carrying it into a backup. Null if there is none or it can't be decrypted.</summary>
+    public async Task<string?> GetSavedPasswordAsync() => (await GetSavedAsync(includePassword: true))?.Options.Password;
+
+    /// <summary>Encrypts a password with this install's keys and saves it with the settings already saved in the app.</summary>
+    public async Task SetSavedPasswordAsync(string password)
+    {
+        Invalidate();
+        if (await GetSavedAsync(includePassword: true) is not { } saved)
+            return;
+
+        var options = Copy(saved.Options);
+        options.Password = password;
+        await SaveAsync(options);
+    }
+
     private void Invalidate()
     {
         _cached = null;

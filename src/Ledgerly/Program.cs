@@ -3,6 +3,7 @@ using Ledgerly.Components;
 using Ledgerly.Components.Account;
 using Ledgerly.Data;
 using Ledgerly.Services;
+using Ledgerly.Services.Backup;
 using Ledgerly.Services.Email;
 using Ledgerly.Services.Settings;
 using Microsoft.AspNetCore.Components.Authorization;
@@ -32,6 +33,8 @@ builder.Services.AddDbContextFactory<LedgerlyDbContext>(options => options.UseSq
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddScoped<ICurrentUser, AuthenticationStateCurrentUser>();
 builder.Services.AddScoped<LedgerService>();
+builder.Services.AddSingleton<DataGeneration>();
+builder.Services.AddScoped<BackupService>();
 
 // Authentication
 builder.Services.AddCascadingAuthenticationState();
@@ -124,6 +127,7 @@ app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 
 app.MapIdentityEndpoints();
+app.MapBackupEndpoints();
 
 // Used by the install script (and container orchestrators) to confirm the app started.
 app.MapHealthChecks("/healthz");
