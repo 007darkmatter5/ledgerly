@@ -3,8 +3,10 @@
 @using System.Globalization
 @using System.Text
 @using System.Text.Encodings.Web
+@using QRCoder
 
 @inject UserManager<ApplicationUser> UserManager
+@inject AppInfo App
 @inject UrlEncoder UrlEncoder
 @inject IdentityRedirectManager RedirectManager
 @inject ILogger<EnableAuthenticator> Logger
@@ -22,9 +24,13 @@ else
     <ol class="acct-steps">
         <li>Install an authenticator app, such as Microsoft Authenticator, Google Authenticator or 1Password.</li>
         <li>
-            In the app, add an account and choose to enter a setup key. Enter this key (spaces and capitals don't matter):
+            In the app, add an account and scan this QR code:
+            <img class="acct-qr" src="@qrCodeDataUri" width="200" height="200" alt="QR code for setting up an authenticator app" />
+            <small class="acct-help">
+                Can't scan it? Choose to enter a setup key instead, and enter this key (spaces and capitals don't matter):
+            </small>
             <kbd class="acct-key">@sharedKey</kbd>
-            <small class="acct-help">Some apps can open this setup link directly: <a href="@authenticatorUri">@authenticatorUri</a></small>
+            <small class="acct-help">On a phone, some apps can open this setup link directly: <a href="@authenticatorUri">@authenticatorUri</a></small>
         </li>
         <li>
             Enter the 6-digit code the app shows:
@@ -48,6 +54,7 @@ else
     private ApplicationUser? user;
     private string? sharedKey;
     private string? authenticatorUri;
+    private string? qrCodeDataUri;
     private IEnumerable<string>? recoveryCodes;
 
     [CascadingParameter]
@@ -121,9 +128,13 @@ else
         authenticatorUri = string.Format(
             CultureInfo.InvariantCulture,
             AuthenticatorUriFormat,
-            UrlEncoder.Encode("Ledgerly"),
+            UrlEncoder.Encode(App.IsBeta ? "Ledgerly Beta" : "Ledgerly"),
             UrlEncoder.Encode(email!),
             unformattedKey);
+
+        // Drawn here rather than by a script or an online service, so the secret key never leaves the server.
+        using var qrData = new QRCodeGenerator().CreateQrCode(authenticatorUri, QRCodeGenerator.ECCLevel.M);
+        qrCodeDataUri = $"data:image/png;base64,{Convert.ToBase64String(new PngByteQRCode(qrData).GetGraphic(8))}";
     }
 
     private static string FormatKey(string unformattedKey)

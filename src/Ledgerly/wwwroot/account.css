@@ -357,6 +357,15 @@ select.acct-input { appearance: auto; }
 .acct-steps li { margin-bottom: 18px; }
 .acct-steps .acct-form { margin-top: 10px; }
 
+/* Always dark on white, with the white margin scanners need, whatever the page theme. */
+.acct-qr {
+    display: block;
+    margin: 10px 0;
+    background: #fff;
+    border-radius: 8px;
+    image-rendering: pixelated;
+}
+
 .acct-key {
     display: inline-block;
     font-family: Consolas, "Courier New", monospace;
