@@ -6,6 +6,8 @@ name: Release
 on:
   push:
     branches: [main, beta]
+    # Docs, the license and the Unraid Community Apps listing don't change the image.
+    paths-ignore: ['**.md', 'LICENSE', 'docs/**', 'templates/**', 'ca_profile.xml']
   workflow_dispatch:
 
 concurrency:

@@ -2,6 +2,10 @@
 
 A personal finance app for tracking bills, where they're paid from, projected account balances, loans and amortization.
 
+![Ledgerly dashboard](docs/images/screenshots/dashboard.png)
+
+Ledgerly is released under the [MIT License](LICENSE).
+
 ## Installing on a server (Beta and Production)
 
 Ledgerly runs in Docker on a Linux server. There are two release channels, each installed separately with its own port, database and encryption keys, so trying out Beta never touches your real data:
@@ -34,7 +38,9 @@ Your own settings go in `/opt/ledgerly/<channel>/ledgerly.env` (for example `ASP
 
 ### Unraid
 
-Use [`deploy/unraid/docker-compose.yml`](deploy/unraid/docker-compose.yml) with the **Docker Compose Manager** plugin (install it from Apps):
+**Production from Community Apps:** in the **Apps** tab, search for **Ledgerly** and click **Install**. The defaults work as they are: port 5005, data in `/mnt/user/appdata/ledgerly/data`, encryption keys in `/mnt/user/appdata/ledgerly/keys`, running as `nobody:users` (99/100). Open the WebUI and create the first account (it becomes the admin). When a new production release is out, the Docker tab shows **update ready**. The template is [`templates/ledgerly.xml`](templates/ledgerly.xml).
+
+**Beta:** use [`deploy/unraid/docker-compose.yml`](deploy/unraid/docker-compose.yml) with the **Docker Compose Manager** plugin (install it from Apps):
 
 1. **Docker** tab → **Compose** section → **Add New Stack**, name it `ledgerly-beta`.
 2. On the stack's gear icon, choose **Edit Stack → Compose File**, paste the file's contents and save.
@@ -44,7 +50,7 @@ It's a single container that stores everything in `/mnt/user/appdata/ledgerly-be
 
 - **Update to the newest beta:** on the stack, **Update Stack** (pulls `:beta` and recreates the container). Database changes run automatically on start.
 - **Back up before updating:** Ledgerly doesn't make its own backup here. Use the **Appdata Backup** plugin (it stops containers for a consistent copy), or stop the stack and copy `/mnt/user/appdata/ledgerly-beta`.
-- **Production on Unraid:** copy the file, then replace every `ledgerly-beta` with `ledgerly`, `:beta` with `:production`, `Beta` with `Production`, and port `5006` with `5005`. Keep the two appdata folders separate.
+- **Beta alongside Production:** the beta stack uses its own port (5006) and appdata folder (`ledgerly-beta`), so both can run at once without sharing data.
 - **Pin a version:** replace `:beta` with a specific tag from the [Releases](https://github.com/007darkmatter5/ledgerly/releases) page, e.g. `:1.0.12-beta`.
 
 ### Release workflow
