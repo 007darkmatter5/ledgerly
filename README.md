@@ -38,7 +38,7 @@ Your own settings go in `/opt/ledgerly/<channel>/ledgerly.env` (for example `ASP
 
 ### Unraid
 
-**Production from Community Apps:** in the **Apps** tab, search for **Ledgerly** and click **Install**. The defaults work as they are: port 5005, data in `/mnt/user/appdata/ledgerly/data`, encryption keys in `/mnt/user/appdata/ledgerly/keys`, running as `nobody:users` (99/100). Open the WebUI and create the first account (it becomes the admin). When a new production release is out, the Docker tab shows **update ready**. The template is [`templates/ledgerly.xml`](templates/ledgerly.xml).
+**Production from Community Apps:** in the **Apps** tab, search for **Ledgerly** and click **Install**. The defaults work as they are: port 5005, data in `/mnt/user/appdata/ledgerly/data`, encryption keys in `/mnt/user/appdata/ledgerly/keys`, running as `nobody:users` (99/100). Open the WebUI and create the first account (it becomes the admin). When a new production release is out, the Docker tab shows **update ready**. The template lives in [007darkmatter5/unraid-templates](https://github.com/007darkmatter5/unraid-templates/blob/main/templates/ledgerly.xml).
 
 **Beta:** use [`deploy/unraid/docker-compose.yml`](deploy/unraid/docker-compose.yml) with the **Docker Compose Manager** plugin (install it from Apps):
 
