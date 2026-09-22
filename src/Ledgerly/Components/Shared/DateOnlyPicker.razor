@@ -1,4 +1,5 @@
-@* MudDatePicker works with DateTime?; this adapts it to DateOnly? for the data model. *@
+@* MudDatePicker works with DateTime?; this adapts it to DateOnly? for the data model.
+   AutoClose because MudBlazor defaults it to false, leaving the calendar open over the form after a date is picked. *@
 <MudDatePicker Label="@Label"
                Date="@Value?.ToDateTime(TimeOnly.MinValue)"
                DateChanged="OnDateChanged"
@@ -7,6 +8,7 @@
                Clearable="Clearable"
                HelperText="@HelperText"
                Editable="true"
+               AutoClose="true"
                Variant="Variant.Outlined"
                Margin="Margin.Dense" />
 

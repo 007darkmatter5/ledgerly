@@ -84,11 +84,13 @@ try {
 
   await page.goto(`${base}/transfers`);
   await openDialog('Add transfer');
-  await page.fill('.mud-dialog input >> nth=0', 'E2E Savings Move');
-  await page.fill('.mud-dialog input >> nth=1', '125');
-  // The accounts default to the two above; the first date has to be picked (the picker is editable).
-  await page.getByLabel('First date').fill(new Date().toLocaleDateString('en-US'));
-  await page.keyboard.press('Enter');
+  const dialog = page.locator('.mud-dialog');
+  await dialog.getByLabel('Name').fill('E2E Savings Move');
+  await dialog.getByLabel('Amount').fill('125');
+  // The accounts default to the two above. Pick the first date from the calendar rather than typing
+  // it: the popover covers the dialog until a day is clicked, and would swallow the click on Save.
+  await dialog.getByLabel('First date').click();
+  await page.click('.mud-picker-calendar .mud-day.mud-current');
   await page.click('.mud-dialog button:has-text("Save")');
   const transferRow = await page.waitForSelector('.mud-table-body tr:has-text("E2E Savings Move")', { timeout: 5000 }).then((h) => h, () => null);
   const transferEnds = transferRow === null ? '' : await transferRow.innerText();
