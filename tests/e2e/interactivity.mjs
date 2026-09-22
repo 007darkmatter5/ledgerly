@@ -87,10 +87,12 @@ try {
   const dialog = page.locator('.mud-dialog');
   await dialog.getByLabel('Name').fill('E2E Savings Move');
   await dialog.getByLabel('Amount').fill('125');
-  // The accounts default to the two above. Pick the first date from the calendar rather than typing
-  // it: the popover covers the dialog until a day is clicked, and would swallow the click on Save.
-  await dialog.getByLabel('First date').click();
-  await page.click('.mud-picker-calendar .mud-day.mud-current');
+  // The accounts default to the two above. Typing the first date also opens the picker's calendar,
+  // which then covers the dialog: clicking today in it both sets the date and closes it, because
+  // DateOnlyPicker sets AutoClose. If it isn't open there is nothing to close, so don't insist.
+  await dialog.getByLabel('First date').fill(new Date().toLocaleDateString('en-US'));
+  await page.locator('.mud-picker-calendar .mud-day.mud-current:not(.mud-adjacent-month)')
+    .click({ timeout: 5000 }).catch(() => {});
   await page.click('.mud-dialog button:has-text("Save")');
   const transferRow = await page.waitForSelector('.mud-table-body tr:has-text("E2E Savings Move")', { timeout: 5000 }).then((h) => h, () => null);
   const transferEnds = transferRow === null ? '' : await transferRow.innerText();
