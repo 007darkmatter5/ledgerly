@@ -98,9 +98,9 @@ public class CreditCardsTests
         var payment = Payment(card, CardPaymentRule.StatementBalance, D(9, 20));
         Bill[] bills = [Charge("Phone", 85m, D(9, 18)), payment];
 
-        var checkingOnly = Projection.Build([Checking], bills, [], D(9, 30));
-        var both = Projection.Build([Checking, card], bills, [], D(9, 30));
-        var cardOnly = Projection.Build([card], bills, [], D(9, 30));
+        var checkingOnly = Projection.Build([Checking], bills, [], [], D(9, 30));
+        var both = Projection.Build([Checking, card], bills, [], [], D(9, 30));
+        var cardOnly = Projection.Build([card], bills, [], [], D(9, 30));
 
         // Before the first projected statement, paying in full pays the balance as of the balance date; later charges go on the next statement.
         var paid = Assert.Single(checkingOnly.Entries);

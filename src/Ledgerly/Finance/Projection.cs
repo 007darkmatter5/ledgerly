@@ -23,12 +23,18 @@ public enum ProjectionEntryKind
     CardSpending,
 
     /// <summary>Interest charged on a credit card.</summary>
-    CardInterest
+    CardInterest,
+
+    /// <summary>Money leaving an account on its way to another account.</summary>
+    TransferOut,
+
+    /// <summary>Money arriving in an account from another account.</summary>
+    TransferIn
 }
 
 /// <param name="IsTransfer">
-/// Money moving between two of the projected accounts (paying a card from a projected account), so it isn't
-/// counted as money in or out.
+/// Money moving between two of the projected accounts (a transfer, or paying a card from a projected
+/// account), so it isn't counted as money in or out.
 /// </param>
 public record ProjectionEntry(
     DateOnly Date,
@@ -42,9 +48,10 @@ public record ProjectionEntry(
     DateOnly? DueDate = null,
     bool IsPaid = false,
     bool IsEstimate = false,
-    bool IsTransfer = false)
+    bool IsTransfer = false,
+    int? TransferId = null)
 {
-    public bool IsMoneyIn => Kind is ProjectionEntryKind.Income or ProjectionEntryKind.CardPayment;
+    public bool IsMoneyIn => Kind is ProjectionEntryKind.Income or ProjectionEntryKind.CardPayment or ProjectionEntryKind.TransferIn;
 }
 
 public class ProjectionResult
@@ -79,15 +86,17 @@ public static class Projection
 {
     /// <summary>
     /// Projects the combined running balance of <paramref name="accounts"/> through <paramref name="through"/>.
-    /// Each account starts from its balance as of its as-of date; every bill occurrence and income
+    /// Each account starts from its balance as of its as-of date; every bill occurrence, income and transfer
     /// dated on or after that day is applied. Paid bills use the date they were paid. Credit card payments are
     /// worked out from the card (<see cref="CreditCards.Simulate"/>), and a projected card also gets its
-    /// typical spending, interest and incoming payments.
+    /// typical spending, interest and incoming payments. A transfer adds an entry to whichever of its two
+    /// accounts is projected; when both are, neither leg counts as money in or out.
     /// </summary>
     public static ProjectionResult Build(
         IReadOnlyCollection<Account> accounts,
         IEnumerable<Bill> bills,
         IEnumerable<Income> incomes,
+        IEnumerable<Transfer> transfers,
         DateOnly through,
         ProjectionMode mode = ProjectionMode.Expected)
     {
@@ -165,6 +174,34 @@ public static class Projection
             }
         }
 
+        foreach (var transfer in transfers)
+        {
+            var from = byId.GetValueOrDefault(transfer.FromAccountId);
+            var to = byId.GetValueOrDefault(transfer.ToAccountId);
+            if (!transfer.IsActive || (from is null && to is null))
+                continue;
+
+            // Only internal when both ends are projected; otherwise the money really does leave or arrive.
+            var isInternal = from is not null && to is not null;
+
+            // Look back a bit so transfers made late (after the as-of date) for earlier dates are counted.
+            var asOf = from is null ? to!.BalanceAsOf : to is null ? from.BalanceAsOf : Min(from.BalanceAsOf, to.BalanceAsOf);
+            foreach (var due in TransferSchedule.Between([transfer], asOf.AddMonths(-3), through))
+            {
+                var date = due.EffectiveDate;
+                if (date > through)
+                    continue;
+
+                if (from is not null && date >= from.BalanceAsOf)
+                    items.Add(new ProjectionEntry(date, ProjectionEntryKind.TransferOut, transfer.Name, from.Id, from.Name,
+                        -due.Amount, 0m, DueDate: due.ScheduledDate, IsPaid: due.IsDone, IsTransfer: isInternal, TransferId: transfer.Id));
+
+                if (to is not null && date >= to.BalanceAsOf)
+                    items.Add(new ProjectionEntry(date, ProjectionEntryKind.TransferIn, transfer.Name, to.Id, to.Name,
+                        due.Amount, 0m, DueDate: due.ScheduledDate, IsPaid: due.IsDone, IsTransfer: isInternal, TransferId: transfer.Id));
+            }
+        }
+
         var entries = new List<ProjectionEntry>(items.Count);
         var running = accounts.Sum(a => a.Balance);
 
@@ -177,4 +214,6 @@ public static class Projection
 
         return new ProjectionResult { Accounts = accounts.ToList(), Through = through, Entries = entries };
     }
+
+    private static DateOnly Min(DateOnly a, DateOnly b) => a < b ? a : b;
 }

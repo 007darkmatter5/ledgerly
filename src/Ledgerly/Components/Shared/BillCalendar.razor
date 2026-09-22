@@ -13,6 +13,7 @@
         var day = date;
         var dues = DuesOn(day);
         var incomes = IncomesOn(day);
+        var moves = TransfersOn(day);
         <div class="@DayClass(day)" role="gridcell">
             <div class="cal-day-head">
                 <span class="cal-date" aria-label="@day.ToString("D")">@day.Day</span>
@@ -26,6 +27,10 @@
                 <div class="cal-item income" title="@($"{income.Name}: +{income.Amount:C}")">
                     <span class="cal-name">@income.Name</span><span class="cal-amount">+@income.Amount.ToString("C0")</span>
                 </div>
+            }
+            @foreach (var move in moves)
+            {
+                @TransferButton(move)
             }
             @foreach (var due in dues)
             {
@@ -44,7 +49,8 @@
         var day = date;
         var dues = DuesOn(day);
         var incomes = IncomesOn(day);
-        if (dues.Count == 0 && incomes.Count == 0)
+        var moves = TransfersOn(day);
+        if (dues.Count == 0 && incomes.Count == 0 && moves.Count == 0)
             continue;
         anything = true;
         <div class="@($"cal-agenda-day{(day == Ledger.Today ? " today" : "")}")">
@@ -55,6 +61,10 @@
             @foreach (var income in incomes)
             {
                 <div class="cal-item income"><span class="cal-name">@income.Name</span><span class="cal-amount">+@income.Amount.ToString("C")</span></div>
+            }
+            @foreach (var move in moves)
+            {
+                @TransferButton(move, "C")
             }
             @foreach (var due in dues)
             {
@@ -77,7 +87,14 @@
     {
         <span class="cal-item income">Income</span>
     }
-    <MudText Typo="Typo.caption" Class="mud-text-secondary">Click a bill to record the amount or mark it paid.</MudText>
+    @if (Transfers is not null)
+    {
+        <span class="cal-item transfer">Transfer</span>
+    }
+    <MudText Typo="Typo.caption" Class="mud-text-secondary">
+        Click a bill to record the amount or mark it paid@(Transfers is null ? "." : ", or a transfer to record that the money moved.")
+        @(Transfers is null ? "" : "Day totals count bills only.")
+    </MudText>
 </div>
 
 @code {
@@ -89,12 +106,16 @@
     /// <summary>Income to show alongside bills, or null to leave it out.</summary>
     [Parameter] public IEnumerable<Income>? Incomes { get; set; }
 
+    /// <summary>Transfers to show alongside bills, or null to leave them out.</summary>
+    [Parameter] public IEnumerable<Transfer>? Transfers { get; set; }
+
     [Parameter] public EventCallback OnChanged { get; set; }
 
     private DateOnly _gridStart;
     private DateOnly _gridEnd;
     private ILookup<DateOnly, BillDue> _dues = Enumerable.Empty<BillDue>().ToLookup(d => d.DueDate);
     private ILookup<DateOnly, Income> _incomes = Enumerable.Empty<Income>().ToLookup(i => i.StartDate);
+    private ILookup<DateOnly, TransferDue> _moves = Enumerable.Empty<TransferDue>().ToLookup(d => d.ScheduledDate);
 
     private static IEnumerable<DayOfWeek> Weekdays
     {
@@ -118,11 +139,14 @@
             .Where(i => i.IsActive)
             .SelectMany(i => Recurrence.Dates(i.Frequency, i.StartDate, i.EndDate, _gridStart, _gridEnd).Select(date => (date, i)))
             .ToLookup(x => x.date, x => x.i);
+        _moves = TransferSchedule.Between(Transfers ?? [], _gridStart, _gridEnd).ToLookup(d => d.ScheduledDate);
     }
 
     private List<BillDue> DuesOn(DateOnly day) => _dues[day].ToList();
 
     private List<Income> IncomesOn(DateOnly day) => _incomes[day].OrderBy(i => i.Name).ToList();
+
+    private List<TransferDue> TransfersOn(DateOnly day) => _moves[day].ToList();
 
     private string DayClass(DateOnly day) =>
         "cal-day" + (day.Month != Month.Month ? " outside" : "") + (day == Ledger.Today ? " today" : "");
@@ -151,6 +175,35 @@
         <span class="cal-name">@due.Bill.Name</span>
         <span class="cal-amount">@(due.IsEstimate ? "≈" : "")@due.Amount.ToString(format)</span>
     </button>;
+
+    private static string Status(TransferDue move, DateOnly today) =>
+        move.IsDone ? "done" : move.IsMissed(today) ? "missed" : "";
+
+    private static string Describe(TransferDue move, DateOnly today) =>
+        $"{move.Transfer.Name}: {move.Amount:C} from {move.Transfer.FromAccount?.Name} to {move.Transfer.ToAccount?.Name} · " + Status(move, today) switch
+        {
+            "done" => $"moved {move.Occurrence!.CompletedOn:MMM d}",
+            "missed" => "not marked as moved",
+            _ => move.Transfer.IsAutomatic ? "automatic" : "scheduled"
+        };
+
+    private RenderFragment TransferButton(TransferDue move, string format = "C0") => @<button type="button" class="@($"cal-item transfer {Status(move, Ledger.Today)}")" title="@Describe(move, Ledger.Today)" aria-label="@Describe(move, Ledger.Today)" @onclick="() => OpenAsync(move)">
+        <MudIcon Icon="@(move.IsDone ? Icons.Material.Filled.Check : Icons.Material.Filled.SwapHoriz)" Style="font-size:0.9rem" />
+        <span class="cal-name">@move.Transfer.Name</span>
+        <span class="cal-amount">@move.Amount.ToString(format)</span>
+    </button>;
+
+    private async Task OpenAsync(TransferDue move)
+    {
+        var parameters = new DialogParameters<RecordTransferDialog>
+        {
+            { d => d.Due, move },
+            { d => d.MarkDone, !move.IsDone && move.ScheduledDate <= Ledger.Today }
+        };
+        var dialog = await Dialogs.ShowAsync<RecordTransferDialog>(null, parameters, new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true });
+        if (await dialog.Result is { Canceled: false })
+            await OnChanged.InvokeAsync();
+    }
 
     private async Task OpenAsync(BillDue due)
     {

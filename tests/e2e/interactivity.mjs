@@ -73,6 +73,29 @@ try {
   note(`payee added with website link: ${payeeLink}`);
   if (!payeeLink) { note('FAIL: new payee or its website link did not appear'); failed = true; }
 
+  // Transfers: two accounts, then a recurring transfer between them, listed with both ends.
+  await page.goto(`${base}/accounts`);
+  for (const name of ['E2E Checking', 'E2E Savings']) {
+    await openDialog('Add account');
+    await page.fill('.mud-dialog input >> nth=0', name);
+    await page.click('.mud-dialog button:has-text("Save")');
+    await page.waitForSelector(`.mud-table-body >> text=${name}`, { timeout: 5000 });
+  }
+
+  await page.goto(`${base}/transfers`);
+  await openDialog('Add transfer');
+  await page.fill('.mud-dialog input >> nth=0', 'E2E Savings Move');
+  await page.fill('.mud-dialog input >> nth=1', '125');
+  // The accounts default to the two above; the first date has to be picked (the picker is editable).
+  await page.getByLabel('First date').fill(new Date().toLocaleDateString('en-US'));
+  await page.keyboard.press('Enter');
+  await page.click('.mud-dialog button:has-text("Save")');
+  const transferRow = await page.waitForSelector('.mud-table-body tr:has-text("E2E Savings Move")', { timeout: 5000 }).then((h) => h, () => null);
+  const transferEnds = transferRow === null ? '' : await transferRow.innerText();
+  const transferListed = transferEnds.includes('E2E Checking') && transferEnds.includes('E2E Savings');
+  note(`transfer added and listed with both accounts: ${transferListed}`);
+  if (!transferListed) { note(`FAIL: new transfer did not appear: ${transferEnds || await page.locator('.mud-dialog').allInnerTexts()}`); failed = true; }
+
   // Backup & restore: download a backup, add a category afterwards, restore, and check the data is back to the backup's.
   const download = await page.request.get(`${base}/Account/Manage/Admin/Backup/Download`);
   note(`backup download: ${download.status()} ${download.headers()['content-type']}`);

@@ -146,7 +146,8 @@
     <MudTabPanel Text="Calendar" Icon="@Icons.Material.Filled.CalendarMonth">
         @MonthHeader(showIncomeToggle: true)
         <div class="px-2 pb-2">
-            <BillCalendar Month="_month" Bills="FilteredBills" Incomes="@(_showIncome ? FilteredIncomes : null)" OnChanged="LoadAsync" />
+            <BillCalendar Month="_month" Bills="FilteredBills" Incomes="@(_showIncome ? FilteredIncomes : null)"
+                          Transfers="@(_showTransfers ? FilteredTransfers : null)" OnChanged="LoadAsync" />
         </div>
     </MudTabPanel>
 
@@ -182,6 +183,8 @@
     private int _tab;
     private List<Income> _incomes = [];
     private bool _showIncome = true;
+    private List<Transfer> _transfers = [];
+    private bool _showTransfers = true;
     private DateOnly _month;
 
     private readonly Func<Bill, object> _byName = b => b.Name;
@@ -210,6 +213,12 @@
             ? null
             : _incomes.Where(i => _accountFilter is null || i.DepositToAccountId == _accountFilter);
 
+    /// <summary>Transfers for the calendar, on the same terms as income. A transfer counts for either of its accounts.</summary>
+    private IEnumerable<Transfer>? FilteredTransfers =>
+        CategoryFilter is not null || PayeeFilter is not null || !string.IsNullOrWhiteSpace(_search)
+            ? null
+            : _transfers.Where(t => _accountFilter is null || t.FromAccountId == _accountFilter || t.ToAccountId == _accountFilter);
+
     /// <summary>Month navigation and totals, shared by the Calendar and Schedule tabs.</summary>
     private RenderFragment MonthHeader(bool showIncomeToggle) => @<MudStack Row="true" AlignItems="AlignItems.Center" Class="px-2 py-2" Wrap="Wrap.Wrap">
         <MudIconButton Icon="@Icons.Material.Filled.ChevronLeft" OnClick="() => _month = _month.AddMonths(-1)" aria-label="Previous month" />
@@ -219,6 +228,7 @@
         @if (showIncomeToggle)
         {
             <MudSwitch @bind-Value="_showIncome" Label="Show income" Color="Color.Success" Class="ml-2" />
+            <MudSwitch @bind-Value="_showTransfers" Label="Show transfers" Color="Color.Secondary" />
         }
         <MudSpacer />
         <MudStack Row="true" Spacing="4">
@@ -255,6 +265,7 @@
         _categories = await Ledger.GetCategoriesAsync();
         _payees = await Ledger.GetPayeesAsync();
         _incomes = await Ledger.GetIncomesAsync();
+        _transfers = await Ledger.GetTransfersAsync();
         _loading = false;
     }
 

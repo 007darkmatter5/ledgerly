@@ -270,6 +270,70 @@ public class Income : ILedgerEntity
     public string? Notes { get; set; }
 }
 
+/// <summary>
+/// A recurring (or one-time) movement of money between two of the ledger's own accounts, such as
+/// a monthly deposit into savings. Both ends must be bank accounts: a credit card is paid by a
+/// <see cref="Bill"/> with a <see cref="Bill.CardAccountId"/>, so the card's own maths still applies.
+/// </summary>
+public class Transfer : ILedgerEntity
+{
+    public Transfer Copy() => (Transfer)MemberwiseClone();
+
+    public int Id { get; set; }
+    public int LedgerId { get; set; }
+    public string Name { get; set; } = "";
+
+    /// <summary>The amount normally moved.</summary>
+    public decimal Amount { get; set; }
+
+    public Frequency Frequency { get; set; } = Frequency.Monthly;
+
+    /// <summary>The first scheduled date; later dates are derived from it.</summary>
+    public DateOnly StartDate { get; set; }
+
+    public DateOnly? EndDate { get; set; }
+
+    /// <summary>The account the money leaves.</summary>
+    public int FromAccountId { get; set; }
+    public Account? FromAccount { get; set; }
+
+    /// <summary>The account the money lands in.</summary>
+    public int ToAccountId { get; set; }
+    public Account? ToAccount { get; set; }
+
+    /// <summary>The bank moves it on its own, so scheduled dates count without being marked done.</summary>
+    public bool IsAutomatic { get; set; }
+
+    public bool IsActive { get; set; } = true;
+    public string? Notes { get; set; }
+
+    public List<TransferOccurrence> Occurrences { get; set; } = [];
+}
+
+/// <summary>
+/// What actually happened (or is known) for one scheduled date of a transfer:
+/// an amount override, and whether/when the money moved.
+/// </summary>
+public class TransferOccurrence
+{
+    public int Id { get; set; }
+    public int TransferId { get; set; }
+    public Transfer? Transfer { get; set; }
+
+    /// <summary>The scheduled date this record belongs to.</summary>
+    public DateOnly ScheduledDate { get; set; }
+
+    /// <summary>Known or actual amount; overrides the transfer's usual amount.</summary>
+    public decimal? Amount { get; set; }
+
+    /// <summary>The day the money actually moved.</summary>
+    public DateOnly? CompletedOn { get; set; }
+
+    public string? Notes { get; set; }
+
+    public bool IsDone => CompletedOn is not null;
+}
+
 /// <summary>An amortizing loan with monthly payments.</summary>
 public class Loan : ILedgerEntity
 {

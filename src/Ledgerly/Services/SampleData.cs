@@ -66,6 +66,7 @@ public static class SampleData
             housing, transportation, education, utilities, entertainment, insurance, debt,
             firstStreetBank, creditUnion, loanServicer, cityPower, cityWater, fiberNet, mobileCo, streamCo, safeDrive, rewardsCard,
             new Income { Name = "Paycheck", Amount = 2150m, Frequency = Frequency.EveryTwoWeeks, StartDate = NextWeekday(today, DayOfWeek.Friday), DepositToAccount = checking },
+            new Transfer { Name = "Emergency fund top-up", Amount = 250m, Frequency = Frequency.Monthly, StartDate = Day(5), FromAccount = checking, ToAccount = savings, IsAutomatic = true },
 
             new Bill { Name = "Mortgage", Payee = firstStreetBank, Category = housing, ExpectedAmount = PaymentOf(mortgage), StartDate = mortgage.FirstPaymentDate, PayFromAccount = checking, Loan = mortgage, AutoPay = true },
             new Bill { Name = "Car Payment", Payee = creditUnion, Category = transportation, ExpectedAmount = PaymentOf(auto) + auto.ExtraPrincipal, StartDate = auto.FirstPaymentDate, PayFromAccount = checking, Loan = auto, AutoPay = true },

@@ -1,0 +1,67 @@
+@inject LedgerService Ledger
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">@Due.Transfer.Name</MudText>
+        <MudText Typo="Typo.body2" Class="mud-text-secondary">
+            Scheduled @Display.Date(Due.ScheduledDate) · @Due.Transfer.Amount.ToString("C")
+            from @(Due.Transfer.FromAccount?.Name ?? "another account") to @(Due.Transfer.ToAccount?.Name ?? "another account")
+        </MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudGrid Spacing="2">
+            <MudItem xs="12" sm="6">
+                <MudNumericField @bind-Value="_amount" Label="Amount" Format="N2" Min="0m" Adornment="Adornment.Start" AdornmentText="$" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true" Immediate="true"
+                                 HelperText="Actual or known amount. Blank uses the usual amount." />
+            </MudItem>
+            <MudItem xs="12" sm="6" Class="d-flex align-center">
+                <MudSwitch @bind-Value="_isDone" Label="Moved" Color="Color.Success" />
+            </MudItem>
+            @if (_isDone)
+            {
+                <MudItem xs="12" sm="6">
+                    <DateOnlyPicker @bind-Value="_completedOn" Label="Moved on" Required="true" />
+                </MudItem>
+            }
+            <MudItem xs="12">
+                <MudTextField @bind-Value="_notes" Label="Notes" Variant="Variant.Outlined" Margin="Margin.Dense" />
+            </MudItem>
+        </MudGrid>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => MudDialog.Cancel()">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveAsync">Save</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = null!;
+    [Parameter, EditorRequired] public TransferDue Due { get; set; } = null!;
+
+    /// <summary>Open with "Moved" switched on, for the quick "mark done" action.</summary>
+    [Parameter] public bool MarkDone { get; set; }
+
+    private decimal? _amount;
+    private bool _isDone;
+    private DateOnly? _completedOn;
+    private string? _notes;
+
+    protected override void OnInitialized()
+    {
+        _amount = Due.Occurrence?.Amount;
+        _isDone = Due.IsDone || MarkDone;
+        _completedOn = Due.Occurrence?.CompletedOn ?? Min(Ledger.Today, Due.ScheduledDate);
+        _notes = Due.Occurrence?.Notes;
+    }
+
+    private static DateOnly Min(DateOnly a, DateOnly b) => a < b ? a : b;
+
+    private async Task SaveAsync()
+    {
+        if (_isDone && _completedOn is null)
+            return;
+
+        await Ledger.RecordTransferOccurrenceAsync(Due.Transfer.Id, Due.ScheduledDate, _amount, _isDone ? _completedOn : null, _notes);
+        MudDialog.Close(DialogResult.Ok(true));
+    }
+}

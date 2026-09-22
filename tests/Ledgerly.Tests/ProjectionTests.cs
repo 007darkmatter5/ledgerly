@@ -13,13 +13,16 @@ public class ProjectionTests
     private static Bill Bill(string name, decimal amount, DateOnly start, int? accountId = 1, Frequency frequency = Frequency.Monthly, decimal? max = null) =>
         new() { Id = name.GetHashCode(), Name = name, ExpectedAmount = amount, MaxAmount = max, StartDate = start, Frequency = frequency, PayFromAccountId = accountId };
 
+    private static Transfer Transfer(string name, decimal amount, DateOnly start, int from = 1, int to = 2, Frequency frequency = Frequency.Once) =>
+        new() { Id = name.GetHashCode(), Name = name, Amount = amount, StartDate = start, Frequency = frequency, FromAccountId = from, ToAccountId = to };
+
     [Fact]
     public void Applies_bills_and_income_in_date_order_from_the_starting_balance()
     {
         Bill[] bills = [Bill("Rent", 800m, D(9, 5)), Bill("Phone", 50m, D(9, 20))];
         Income[] incomes = [new() { Name = "Pay", Amount = 600m, Frequency = Frequency.EveryTwoWeeks, StartDate = D(9, 12), DepositToAccountId = 1 }];
 
-        var result = Projection.Build([Checking], bills, incomes, D(9, 30));
+        var result = Projection.Build([Checking], bills, incomes, [], D(9, 30));
 
         Assert.Equal(["Rent", "Pay", "Phone", "Pay"], result.Entries.Select(e => e.Description));
         Assert.Equal([200m, 800m, 750m, 1350m], result.Entries.Select(e => e.RunningBalance));
@@ -35,7 +38,7 @@ public class ProjectionTests
         var result = Projection.Build([Checking],
             [Bill("Big bill", 1500m, D(9, 10))],
             [new Income { Name = "Pay", Amount = 1000m, Frequency = Frequency.Once, StartDate = D(9, 10), DepositToAccountId = 1 }],
-            D(9, 30));
+            [], D(9, 30));
 
         Assert.Equal(ProjectionEntryKind.Income, result.Entries[0].Kind);
         Assert.Null(result.FirstBelowZero);
@@ -44,7 +47,7 @@ public class ProjectionTests
     [Fact]
     public void Flags_first_dates_below_zero_and_below_threshold()
     {
-        var result = Projection.Build([Checking], [Bill("A", 850m, D(9, 3), frequency: Frequency.Once), Bill("B", 300m, D(9, 8), frequency: Frequency.Once)], [], D(9, 30));
+        var result = Projection.Build([Checking], [Bill("A", 850m, D(9, 3), frequency: Frequency.Once), Bill("B", 300m, D(9, 8), frequency: Frequency.Once)], [], [], D(9, 30));
 
         Assert.Equal(D(9, 3), result.FirstBelowThreshold!.Date);
         Assert.Equal(D(9, 8), result.FirstBelowZero!.Date);
@@ -56,7 +59,7 @@ public class ProjectionTests
     {
         var card = new Account { Id = 3, Name = "Card", Balance = -620m, BalanceAsOf = D(9, 1), LowBalanceThreshold = 0m };
 
-        var result = Projection.Build([card], [Bill("Phone", 85m, D(9, 18), accountId: 3)], [], D(9, 30));
+        var result = Projection.Build([card], [Bill("Phone", 85m, D(9, 18), accountId: 3)], [], [], D(9, 30));
 
         Assert.Null(result.FirstBelowZero);
         Assert.Null(result.FirstBelowThreshold);
@@ -74,7 +77,7 @@ public class ProjectionTests
             Bill("Unassigned", 100m, D(9, 10), accountId: null)
         ];
 
-        var result = Projection.Build([Checking], bills, [], D(9, 30));
+        var result = Projection.Build([Checking], bills, [], [], D(9, 30));
 
         Assert.Equal(["On balance date"], result.Entries.Select(e => e.Description));
     }
@@ -85,7 +88,7 @@ public class ProjectionTests
         var electric = Bill("Electric", 120m, D(9, 15), frequency: Frequency.Once, max: 200m);
         electric.Occurrences = [new BillOccurrence { DueDate = D(9, 15), Amount = 143.27m, PaidOn = D(9, 12) }];
 
-        var entry = Assert.Single(Projection.Build([Checking], [electric], [], D(9, 30)).Entries);
+        var entry = Assert.Single(Projection.Build([Checking], [electric], [], [], D(9, 30)).Entries);
 
         Assert.Equal(D(9, 12), entry.Date);
         Assert.Equal(-143.27m, entry.Amount);
@@ -99,7 +102,7 @@ public class ProjectionTests
         var bill = Bill("Insurance", 500m, D(9, 10), frequency: Frequency.Once);
         bill.Occurrences = [new BillOccurrence { DueDate = D(9, 10), PaidOn = D(8, 28) }];
 
-        Assert.Empty(Projection.Build([Checking], [bill], [], D(9, 30)).Entries);
+        Assert.Empty(Projection.Build([Checking], [bill], [], [], D(9, 30)).Entries);
     }
 
     [Fact]
@@ -108,7 +111,7 @@ public class ProjectionTests
         var bill = Bill("Late", 75m, D(8, 25), frequency: Frequency.Once);
         bill.Occurrences = [new BillOccurrence { DueDate = D(8, 25), PaidOn = D(9, 3) }];
 
-        var entry = Assert.Single(Projection.Build([Checking], [bill], [], D(9, 30)).Entries);
+        var entry = Assert.Single(Projection.Build([Checking], [bill], [], [], D(9, 30)).Entries);
         Assert.Equal(D(9, 3), entry.Date);
     }
 
@@ -118,8 +121,8 @@ public class ProjectionTests
         var water = Bill("Water", 80m, D(9, 10), max: 130m);
         water.Occurrences = [new BillOccurrence { DueDate = D(10, 10), Amount = 95m }];
 
-        var expected = Projection.Build([Checking], [water], [], D(10, 31));
-        var worst = Projection.Build([Checking], [water], [], D(10, 31), ProjectionMode.WorstCase);
+        var expected = Projection.Build([Checking], [water], [], [], D(10, 31));
+        var worst = Projection.Build([Checking], [water], [], [], D(10, 31), ProjectionMode.WorstCase);
 
         Assert.Equal([-80m, -95m], expected.Entries.Select(e => e.Amount));
         Assert.Equal([-130m, -95m], worst.Entries.Select(e => e.Amount));
@@ -130,7 +133,7 @@ public class ProjectionTests
     [Fact]
     public void Combines_multiple_accounts()
     {
-        var result = Projection.Build([Checking, Savings], [Bill("Rent", 800m, D(9, 5)), Bill("Transfer", 100m, D(9, 6), accountId: 2)], [], D(9, 30));
+        var result = Projection.Build([Checking, Savings], [Bill("Rent", 800m, D(9, 5)), Bill("Transfer", 100m, D(9, 6), accountId: 2)], [], [], D(9, 30));
 
         Assert.Equal(6000m, result.StartingBalance);
         Assert.Equal(5100m, result.EndingBalance);
@@ -144,7 +147,7 @@ public class ProjectionTests
         bill.IsActive = false;
 
         Assert.Empty(Projection.Build([Checking], [bill],
-            [new Income { Name = "Old job", Amount = 1m, StartDate = D(9, 5), Frequency = Frequency.Weekly, DepositToAccountId = 1, IsActive = false }], D(9, 30)).Entries);
+            [new Income { Name = "Old job", Amount = 1m, StartDate = D(9, 5), Frequency = Frequency.Weekly, DepositToAccountId = 1, IsActive = false }], [], D(9, 30)).Entries);
     }
 
     [Fact]
@@ -162,5 +165,68 @@ public class ProjectionTests
         var overdue = BillSchedule.Between([manual, auto, settled], D(8, 1), today.AddDays(-1)).Where(d => d.IsOverdue(today));
 
         Assert.Equal(["Manual"], overdue.Select(d => d.Bill.Name));
+    }
+
+    [Fact]
+    public void A_transfer_between_two_projected_accounts_moves_money_without_counting_as_money_in_or_out()
+    {
+        var result = Projection.Build([Checking, Savings], [], [], [Transfer("To savings", 300m, D(9, 10))], D(9, 30));
+
+        Assert.Equal([ProjectionEntryKind.TransferIn, ProjectionEntryKind.TransferOut], result.Entries.Select(e => e.Kind));
+        Assert.Equal([2, 1], result.Entries.Select(e => e.AccountId));
+        Assert.Equal([300m, -300m], result.Entries.Select(e => e.Amount));
+        Assert.All(result.Entries, e => Assert.True(e.IsTransfer));
+
+        Assert.Equal(6000m, result.StartingBalance);
+        Assert.Equal(6000m, result.EndingBalance);
+        Assert.Equal(0m, result.TotalIn);
+        Assert.Equal(0m, result.TotalOut);
+    }
+
+    [Fact]
+    public void A_transfer_with_only_one_end_projected_really_does_leave_or_arrive()
+    {
+        var transfer = Transfer("To savings", 300m, D(9, 10));
+
+        var fromOnly = Projection.Build([Checking], [], [], [transfer], D(9, 30));
+        var toOnly = Projection.Build([Savings], [], [], [transfer], D(9, 30));
+
+        var leaving = Assert.Single(fromOnly.Entries);
+        Assert.Equal(ProjectionEntryKind.TransferOut, leaving.Kind);
+        Assert.False(leaving.IsTransfer);
+        Assert.Equal(300m, fromOnly.TotalOut);
+        Assert.Equal(700m, fromOnly.EndingBalance);
+
+        var arriving = Assert.Single(toOnly.Entries);
+        Assert.Equal(ProjectionEntryKind.TransferIn, arriving.Kind);
+        Assert.False(arriving.IsTransfer);
+        Assert.Equal(300m, toOnly.TotalIn);
+        Assert.Equal(5300m, toOnly.EndingBalance);
+    }
+
+    [Fact]
+    public void A_recorded_transfer_uses_its_amount_and_the_day_the_money_moved()
+    {
+        var transfer = Transfer("To savings", 300m, D(9, 10));
+        transfer.Occurrences = [new TransferOccurrence { ScheduledDate = D(9, 10), Amount = 450m, CompletedOn = D(9, 12) }];
+
+        var entry = Assert.Single(Projection.Build([Checking], [], [], [transfer], D(9, 30)).Entries);
+
+        Assert.Equal(D(9, 12), entry.Date);
+        Assert.Equal(D(9, 10), entry.DueDate);
+        Assert.Equal(-450m, entry.Amount);
+        Assert.True(entry.IsPaid);
+        Assert.Equal(transfer.Id, entry.TransferId);
+    }
+
+    [Fact]
+    public void Inactive_transfers_and_transfers_between_other_accounts_are_left_out()
+    {
+        var inactive = Transfer("Old standing order", 100m, D(9, 5));
+        inactive.IsActive = false;
+        var elsewhere = Transfer("Between other accounts", 100m, D(9, 5), from: 8, to: 9);
+        var beforeTheBalanceDate = Transfer("Already in the balance", 100m, D(8, 20));
+
+        Assert.Empty(Projection.Build([Checking, Savings], [], [], [inactive, elsewhere, beforeTheBalanceDate], D(9, 30)).Entries);
     }
 }

@@ -12,6 +12,8 @@ public class LedgerlyDbContext(DbContextOptions<LedgerlyDbContext> options) : Id
     public DbSet<Bill> Bills => Set<Bill>();
     public DbSet<BillOccurrence> BillOccurrences => Set<BillOccurrence>();
     public DbSet<Income> Incomes => Set<Income>();
+    public DbSet<Transfer> Transfers => Set<Transfer>();
+    public DbSet<TransferOccurrence> TransferOccurrences => Set<TransferOccurrence>();
     public DbSet<Loan> Loans => Set<Loan>();
     public DbSet<AppSetting> AppSettings => Set<AppSetting>();
 
@@ -88,6 +90,22 @@ public class LedgerlyDbContext(DbContextOptions<LedgerlyDbContext> options) : Id
             e.Property(i => i.Frequency).HasConversion<string>().HasMaxLength(20);
             e.HasOne<Ledger>().WithMany().HasForeignKey(i => i.LedgerId).OnDelete(DeleteBehavior.Cascade);
             e.HasOne(i => i.DepositToAccount).WithMany().OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<Transfer>(e =>
+        {
+            e.Property(t => t.Name).HasMaxLength(100);
+            e.Property(t => t.Frequency).HasConversion<string>().HasMaxLength(20);
+            e.HasOne<Ledger>().WithMany().HasForeignKey(t => t.LedgerId).OnDelete(DeleteBehavior.Cascade);
+            // A transfer needs both ends, so deleting either account deletes it (like an income's account).
+            e.HasOne(t => t.FromAccount).WithMany().HasForeignKey(t => t.FromAccountId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(t => t.ToAccount).WithMany().HasForeignKey(t => t.ToAccountId).OnDelete(DeleteBehavior.Cascade);
+            e.HasMany(t => t.Occurrences).WithOne(o => o.Transfer).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<TransferOccurrence>(e =>
+        {
+            e.HasIndex(o => new { o.TransferId, o.ScheduledDate }).IsUnique();
         });
 
         modelBuilder.Entity<Loan>(e =>

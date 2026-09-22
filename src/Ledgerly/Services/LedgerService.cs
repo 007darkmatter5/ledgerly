@@ -387,6 +387,80 @@ public class LedgerService(IDbContextFactory<LedgerlyDbContext> dbFactory, ICurr
 
     public Task DeleteIncomeAsync(int id) => DeleteAsync<Income>(id);
 
+    // Transfers
+
+    public async Task<List<Transfer>> GetTransfersAsync()
+    {
+        var ledgerId = await LedgerIdAsync();
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var transfers = await db.Transfers.AsNoTracking()
+            .Where(t => t.LedgerId == ledgerId)
+            .Include(t => t.FromAccount)
+            .Include(t => t.ToAccount)
+            .Include(t => t.Occurrences)
+            .ToListAsync();
+        return transfers.OrderBy(t => t.Name).ToList();
+    }
+
+    /// <summary>
+    /// Saves a transfer between two of the ledger's accounts. Throws <see cref="LedgerValidationException"/>
+    /// for a blank name, a negative amount, the same account at both ends, or a credit card at either end.
+    /// </summary>
+    public async Task SaveTransferAsync(Transfer transfer)
+    {
+        transfer.Name = transfer.Name.Trim();
+        if (transfer.Name.Length == 0)
+            throw new LedgerValidationException("Enter a name for the transfer.");
+        if (transfer.Amount < 0)
+            throw new LedgerValidationException("A transfer amount can't be negative.");
+        if (transfer.FromAccountId == transfer.ToAccountId)
+            throw new LedgerValidationException("Choose two different accounts to move money between.");
+
+        var ledgerId = await LedgerIdAsync();
+        await using (var db = await dbFactory.CreateDbContextAsync())
+        {
+            await EnsureInLedgerAsync(db.Accounts, transfer.FromAccountId, ledgerId);
+            await EnsureInLedgerAsync(db.Accounts, transfer.ToAccountId, ledgerId);
+
+            // A card's balance is worked out by CreditCards.Simulate from the bills that charge and pay it,
+            // so money arriving another way would be counted twice.
+            var cards = await db.Accounts
+                .Where(a => (a.Id == transfer.FromAccountId || a.Id == transfer.ToAccountId) && a.Type == AccountType.CreditCard)
+                .AnyAsync();
+            if (cards)
+                throw new LedgerValidationException("Transfers move money between bank accounts. To pay a credit card, add a bill that pays the card.");
+        }
+
+        await SaveAsync(transfer);
+    }
+
+    public Task DeleteTransferAsync(int id) => DeleteAsync<Transfer>(id);
+
+    /// <summary>Records the amount and/or completion for one scheduled date of a transfer.</summary>
+    public async Task RecordTransferOccurrenceAsync(int transferId, DateOnly scheduledDate, decimal? amount, DateOnly? completedOn, string? notes = null)
+    {
+        var ledgerId = await LedgerIdAsync();
+        await using var db = await dbFactory.CreateDbContextAsync();
+        await EnsureInLedgerAsync(db.Transfers, transferId, ledgerId);
+        var occurrence = await db.TransferOccurrences.SingleOrDefaultAsync(o => o.TransferId == transferId && o.ScheduledDate == scheduledDate);
+
+        if (amount is null && completedOn is null && string.IsNullOrWhiteSpace(notes))
+        {
+            // Nothing left to record: go back to the transfer's defaults.
+            if (occurrence is not null)
+                db.TransferOccurrences.Remove(occurrence);
+        }
+        else
+        {
+            occurrence ??= db.TransferOccurrences.Add(new TransferOccurrence { TransferId = transferId, ScheduledDate = scheduledDate }).Entity;
+            occurrence.Amount = amount;
+            occurrence.CompletedOn = completedOn;
+            occurrence.Notes = notes;
+        }
+
+        await db.SaveChangesAsync();
+    }
+
     // Loans
 
     public async Task<List<Loan>> GetLoansAsync()
@@ -420,7 +494,7 @@ public class LedgerService(IDbContextFactory<LedgerlyDbContext> dbFactory, ICurr
     {
         var ids = accountIds.ToHashSet();
         var accounts = (await GetAccountsAsync()).Where(a => ids.Contains(a.Id)).ToList();
-        return Projection.Build(accounts, await GetBillsAsync(), await GetIncomesAsync(), through, mode);
+        return Projection.Build(accounts, await GetBillsAsync(), await GetIncomesAsync(), await GetTransfersAsync(), through, mode);
     }
 
     public async Task<bool> HasAnyDataAsync()
@@ -429,6 +503,7 @@ public class LedgerService(IDbContextFactory<LedgerlyDbContext> dbFactory, ICurr
         await using var db = await dbFactory.CreateDbContextAsync();
         return await db.Accounts.AnyAsync(a => a.LedgerId == ledgerId)
             || await db.Bills.AnyAsync(b => b.LedgerId == ledgerId)
+            || await db.Transfers.AnyAsync(t => t.LedgerId == ledgerId)
             || await db.Loans.AnyAsync(l => l.LedgerId == ledgerId);
     }
 

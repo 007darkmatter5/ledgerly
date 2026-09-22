@@ -1,0 +1,130 @@
+@inject LedgerService Ledger
+
+<MudDialog>
+    <DialogContent>
+        @if (_accounts.Count < 2)
+        {
+            <MudAlert Severity="Severity.Info" Class="mb-3">Add at least two bank accounts first, so there's somewhere to move money from and to.</MudAlert>
+        }
+        @if (_error is not null)
+        {
+            <MudAlert Severity="Severity.Error" Class="mb-3">@_error</MudAlert>
+        }
+        <MudForm @ref="_form">
+            <MudGrid Spacing="2">
+                <MudItem xs="12" sm="8">
+                    <MudTextField @bind-Value="Model.Name" Label="Name" Required="true" RequiredError="Name is required" MaxLength="100" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                </MudItem>
+                <MudItem xs="12" sm="4">
+                    <MudNumericField @bind-Value="Model.Amount" Label="Amount" Format="N2" Min="0m" Adornment="Adornment.Start" AdornmentText="$" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <MudSelect T="int" @bind-Value="Model.FromAccountId" Label="From" Required="true" RequiredError="Choose an account" Variant="Variant.Outlined" Margin="Margin.Dense"
+                               ToStringFunc="@(id => NameOf(id))">
+                        @foreach (var account in _accounts)
+                        {
+                            <MudSelectItem T="int" Value="account.Id">@account.Name</MudSelectItem>
+                        }
+                    </MudSelect>
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <MudSelect T="int" @bind-Value="Model.ToAccountId" Label="To" Required="true" RequiredError="Choose an account" Variant="Variant.Outlined" Margin="Margin.Dense"
+                               ToStringFunc="@(id => NameOf(id))">
+                        @foreach (var account in _accounts.Where(a => a.Id != Model.FromAccountId))
+                        {
+                            <MudSelectItem T="int" Value="account.Id">@account.Name</MudSelectItem>
+                        }
+                    </MudSelect>
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <MudSelect @bind-Value="Model.Frequency" Label="Repeats" Variant="Variant.Outlined" Margin="Margin.Dense">
+                        @foreach (var frequency in Enum.GetValues<Frequency>())
+                        {
+                            <MudSelectItem Value="frequency">@Display.Of(frequency)</MudSelectItem>
+                        }
+                    </MudSelect>
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <DateOnlyPicker @bind-Value="_startDate" Label="@(Model.Frequency == Frequency.Once ? "Date" : "First date")" Required="true" />
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    @if (Model.Frequency != Frequency.Once)
+                    {
+                        <DateOnlyPicker @bind-Value="_endDate" Label="Last date (optional)" Clearable="true" />
+                    }
+                </MudItem>
+                <MudItem xs="12">
+                    <MudSwitch @bind-Value="Model.IsAutomatic" Label="The bank moves it automatically" Color="Color.Info" />
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">Scheduled dates count as done without being marked, so they're never flagged as missed.</MudText>
+                </MudItem>
+                <MudItem xs="12">
+                    <MudSwitch @bind-Value="Model.IsActive" Label="Active" Color="Color.Primary" />
+                </MudItem>
+                <MudItem xs="12">
+                    <MudTextField @bind-Value="Model.Notes" Label="Notes" Lines="2" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                </MudItem>
+            </MudGrid>
+        </MudForm>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => MudDialog.Cancel()">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveAsync" Disabled="_accounts.Count < 2 || _saving">Save</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = null!;
+    [Parameter] public Transfer Model { get; set; } = new();
+
+    private MudForm _form = null!;
+    private List<Account> _accounts = [];
+    private DateOnly? _startDate;
+    private DateOnly? _endDate;
+    private string? _error;
+    private bool _saving;
+
+    private string NameOf(int id) => _accounts.FirstOrDefault(a => a.Id == id)?.Name ?? "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        _startDate = Model.Id == 0 ? null : Model.StartDate;
+        _endDate = Model.EndDate;
+
+        // Credit cards are paid by a bill that pays the card, so their balance keeps following the card's own maths.
+        _accounts = (await Ledger.GetAccountsAsync())
+            .Where(a => !a.IsCreditCard && (a.IsActive || a.Id == Model.FromAccountId || a.Id == Model.ToAccountId))
+            .ToList();
+
+        if (Model.Id == 0 && _accounts.Count >= 2)
+        {
+            Model.FromAccountId = (_accounts.FirstOrDefault(a => a.Type == AccountType.Checking) ?? _accounts[0]).Id;
+            Model.ToAccountId = (_accounts.FirstOrDefault(a => a.Type == AccountType.Savings && a.Id != Model.FromAccountId)
+                ?? _accounts.First(a => a.Id != Model.FromAccountId)).Id;
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        await _form.ValidateAsync();
+        if (!_form.IsValid || _startDate is null || Model.FromAccountId == 0 || Model.ToAccountId == 0)
+            return;
+
+        Model.StartDate = _startDate.Value;
+        Model.EndDate = Model.Frequency == Frequency.Once ? null : _endDate;
+
+        _saving = true;
+        try
+        {
+            await Ledger.SaveTransferAsync(Model);
+            MudDialog.Close(DialogResult.Ok(Model.Id));
+        }
+        catch (LedgerValidationException ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+}

@@ -1,0 +1,218 @@
+@page "/transfers"
+@inject LedgerService Ledger
+@inject IDialogService Dialogs
+@inject ISnackbar Snackbar
+
+<PageTitle>Transfers · Ledgerly</PageTitle>
+
+<MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-4" Wrap="Wrap.Wrap">
+    <MudStack Spacing="0">
+        <MudText Typo="Typo.h4">Transfers</MudText>
+        <MudText Typo="Typo.body2" Class="mud-text-secondary">Money you move between your own accounts, so both running balances follow it.</MudText>
+    </MudStack>
+    <MudSpacer />
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="() => EditAsync(null)">Add transfer</MudButton>
+</MudStack>
+
+@if (_missed.Count > 0)
+{
+    <MudAlert Severity="Severity.Warning" Class="mb-3" Dense="true">
+        @_missed.Count scheduled transfer@(_missed.Count == 1 ? "" : "s") past their date @(_missed.Count == 1 ? "is" : "are") not marked as moved. Record them on the Schedule tab.
+    </MudAlert>
+}
+
+<MudTabs Elevation="1" Rounded="true" TabPanelsClass="pa-2" @bind-ActivePanelIndex="_tab">
+    <MudTabPanel Text="All transfers" Icon="@Icons.Material.Filled.List">
+        <MudTable Items="Filtered" Hover="true" Loading="_loading" Breakpoint="Breakpoint.Sm" Elevation="0">
+            <ToolBarContent>
+                <MudSwitch @bind-Value="_showInactive" Label="Show inactive" Color="Color.Primary" />
+            </ToolBarContent>
+            <HeaderContent>
+                <MudTh>Transfer</MudTh>
+                <MudTh Style="text-align:right">Amount</MudTh>
+                <MudTh>Repeats</MudTh>
+                <MudTh>Next</MudTh>
+                <MudTh>From</MudTh>
+                <MudTh>To</MudTh>
+                <MudTh Style="text-align:right">Per month</MudTh>
+                <MudTh></MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd DataLabel="Transfer">
+                    <MudText Class="@(context.IsActive ? null : "mud-text-disabled")">@context.Name</MudText>
+                    <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center">
+                        @if (context.IsAutomatic)
+                        {
+                            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Info">Automatic</MudChip>
+                        }
+                        @if (!context.IsActive)
+                        {
+                            <MudChip T="string" Size="Size.Small">Inactive</MudChip>
+                        }
+                    </MudStack>
+                </MudTd>
+                <MudTd DataLabel="Amount" Style="text-align:right">@context.Amount.ToString("C")</MudTd>
+                <MudTd DataLabel="Repeats">@Display.Of(context.Frequency)</MudTd>
+                <MudTd DataLabel="Next">
+                    @if (Recurrence.Next(context.Frequency, context.StartDate, context.EndDate, Ledger.Today) is { } next)
+                    {
+                        <MudText Typo="Typo.body2">@Display.Date(next)</MudText>
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary">@Display.Relative(next, Ledger.Today)</MudText>
+                    }
+                    else
+                    {
+                        <MudText Typo="Typo.body2" Class="mud-text-secondary">Ended</MudText>
+                    }
+                </MudTd>
+                <MudTd DataLabel="From">@context.FromAccount?.Name</MudTd>
+                <MudTd DataLabel="To">@context.ToAccount?.Name</MudTd>
+                <MudTd DataLabel="Per month" Style="text-align:right">@Recurrence.MonthlyEquivalent(context.Frequency, context.Amount).ToString("C")</MudTd>
+                <MudTd Style="text-align:right; white-space:nowrap">
+                    <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="() => EditAsync(context)" aria-label="Edit" />
+                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="() => DeleteAsync(context)" aria-label="Delete" />
+                </MudTd>
+            </RowTemplate>
+            <FooterContent>
+                <MudTd colspan="6" Style="text-align:right"><strong>Total per month (active)</strong></MudTd>
+                <MudTd Style="text-align:right"><strong>@Filtered.Where(t => t.IsActive).Sum(t => Recurrence.MonthlyEquivalent(t.Frequency, t.Amount)).ToString("C")</strong></MudTd>
+                <MudTd />
+            </FooterContent>
+            <NoRecordsContent>
+                <MudText Class="py-6 mud-text-secondary">@(_transfers.Count == 0 ? NoTransfersText : "No transfers match these filters.")</MudText>
+            </NoRecordsContent>
+        </MudTable>
+    </MudTabPanel>
+
+    <MudTabPanel Text="Schedule" Icon="@Icons.Material.Filled.EventNote">
+        <MudStack Row="true" AlignItems="AlignItems.Center" Class="px-2 py-2" Wrap="Wrap.Wrap">
+            <MudIconButton Icon="@Icons.Material.Filled.ChevronLeft" OnClick="() => _month = _month.AddMonths(-1)" aria-label="Previous month" />
+            <MudText Typo="Typo.h6" Style="min-width:160px; text-align:center">@_month.ToString("MMMM yyyy")</MudText>
+            <MudIconButton Icon="@Icons.Material.Filled.ChevronRight" OnClick="() => _month = _month.AddMonths(1)" aria-label="Next month" />
+            <MudButton Size="Size.Small" OnClick="() => _month = ThisMonth" Disabled="_month == ThisMonth">This month</MudButton>
+            <MudSpacer />
+            <MudStack Row="true" Spacing="4">
+                <MudStack Spacing="0" AlignItems="AlignItems.End">
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary">Total</MudText>
+                    <MudText Typo="Typo.subtitle1">@MonthSchedule.Sum(d => d.Amount).ToString("C")</MudText>
+                </MudStack>
+                <MudStack Spacing="0" AlignItems="AlignItems.End">
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary">Moved</MudText>
+                    <MudText Typo="Typo.subtitle1" Color="Color.Success">@MonthSchedule.Where(d => d.IsDone).Sum(d => d.Amount).ToString("C")</MudText>
+                </MudStack>
+            </MudStack>
+        </MudStack>
+
+        <MudTable Items="MonthSchedule" Hover="true" Breakpoint="Breakpoint.Sm" Elevation="0">
+            <HeaderContent>
+                <MudTh>Date</MudTh>
+                <MudTh>Transfer</MudTh>
+                <MudTh>From</MudTh>
+                <MudTh>To</MudTh>
+                <MudTh Style="text-align:right">Amount</MudTh>
+                <MudTh>Status</MudTh>
+                <MudTh></MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd DataLabel="Date">@Display.ShortDate(context.ScheduledDate)</MudTd>
+                <MudTd DataLabel="Transfer">@context.Transfer.Name</MudTd>
+                <MudTd DataLabel="From">@context.Transfer.FromAccount?.Name</MudTd>
+                <MudTd DataLabel="To">@context.Transfer.ToAccount?.Name</MudTd>
+                <MudTd DataLabel="Amount" Style="text-align:right">@context.Amount.ToString("C")</MudTd>
+                <MudTd DataLabel="Status">
+                    @if (context.IsDone)
+                    {
+                        <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Outlined">Moved @Display.ShortDate(context.Occurrence!.CompletedOn!.Value)</MudChip>
+                    }
+                    else if (context.IsMissed(Ledger.Today))
+                    {
+                        <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Outlined">Not marked</MudChip>
+                    }
+                    else if (context.Transfer.IsAutomatic)
+                    {
+                        <MudChip T="string" Size="Size.Small" Color="Color.Info" Variant="Variant.Outlined">Automatic</MudChip>
+                    }
+                    else
+                    {
+                        <MudText Typo="Typo.body2" Class="mud-text-secondary">Scheduled</MudText>
+                    }
+                </MudTd>
+                <MudTd Style="text-align:right; white-space:nowrap">
+                    <MudButton Size="Size.Small" OnClick="() => RecordAsync(context)">@(context.IsDone ? "Edit" : "Record")</MudButton>
+                </MudTd>
+            </RowTemplate>
+            <NoRecordsContent>
+                <MudText Class="py-6 mud-text-secondary">No transfers scheduled this month.</MudText>
+            </NoRecordsContent>
+        </MudTable>
+    </MudTabPanel>
+</MudTabs>
+
+@code {
+    private const string NoTransfersText = "No transfers yet. Add the monthly move into savings, or anything else you shift between your own accounts.";
+
+    private bool _loading = true;
+    private bool _showInactive;
+    private int _tab;
+    private DateOnly _month;
+    private List<Transfer> _transfers = [];
+    private List<TransferDue> _missed = [];
+
+    private DateOnly ThisMonth => new(Ledger.Today.Year, Ledger.Today.Month, 1);
+
+    private IEnumerable<Transfer> Filtered => _transfers.Where(t => _showInactive || t.IsActive);
+
+    private List<TransferDue> MonthSchedule =>
+        TransferSchedule.Between(Filtered, _month, _month.AddMonths(1).AddDays(-1)).ToList();
+
+    protected override async Task OnInitializedAsync()
+    {
+        _month = ThisMonth;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _transfers = await Ledger.GetTransfersAsync();
+        _missed = TransferSchedule.Between(_transfers, Ledger.Today.AddDays(-90), Ledger.Today.AddDays(-1))
+            .Where(d => d.IsMissed(Ledger.Today))
+            .ToList();
+        _loading = false;
+    }
+
+    private async Task EditAsync(Transfer? transfer)
+    {
+        var parameters = new DialogParameters<TransferDialog> { { d => d.Model, transfer?.Copy() ?? new Transfer() } };
+        var dialog = await Dialogs.ShowAsync<TransferDialog>(transfer is null ? "Add transfer" : "Edit transfer", parameters,
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true });
+        if (await dialog.Result is { Canceled: false })
+        {
+            Snackbar.Add(transfer is null ? "Transfer added" : "Transfer saved", Severity.Success);
+            await LoadAsync();
+        }
+    }
+
+    private async Task RecordAsync(TransferDue due)
+    {
+        var parameters = new DialogParameters<RecordTransferDialog>
+        {
+            { d => d.Due, due },
+            { d => d.MarkDone, !due.IsDone && due.ScheduledDate <= Ledger.Today }
+        };
+        var dialog = await Dialogs.ShowAsync<RecordTransferDialog>(null, parameters, new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true });
+        if (await dialog.Result is { Canceled: false })
+            await LoadAsync();
+    }
+
+    private async Task DeleteAsync(Transfer transfer)
+    {
+        var confirmed = await Dialogs.ShowMessageBoxAsync("Delete transfer?",
+            $"Delete \"{transfer.Name}\" and everything recorded for it? To stop it without losing that, edit it and turn off Active instead.",
+            yesText: "Delete", cancelText: "Cancel");
+        if (confirmed != true)
+            return;
+
+        await Ledger.DeleteTransferAsync(transfer.Id);
+        Snackbar.Add("Transfer deleted", Severity.Info);
+        await LoadAsync();
+    }
+}

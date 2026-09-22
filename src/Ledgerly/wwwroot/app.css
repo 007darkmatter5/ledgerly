@@ -196,6 +196,9 @@ button.cal-item:focus-visible { outline: 2px solid var(--mud-palette-primary); o
 .cal-item.overdue { background: rgb(from var(--mud-palette-error) r g b / 0.14); border-color: var(--mud-palette-error); }
 .cal-item.autopay { background: rgb(from var(--mud-palette-info) r g b / 0.14); }
 .cal-item.income { background: transparent; border: 1px dashed rgb(from var(--mud-palette-success) r g b / 0.6); color: var(--mud-palette-success); }
+.cal-item.transfer { background: transparent; border: 1px dashed rgb(from var(--mud-palette-secondary) r g b / 0.7); color: var(--mud-palette-secondary); }
+.cal-item.transfer.done { background: rgb(from var(--mud-palette-secondary) r g b / 0.14); border-style: solid; }
+.cal-item.transfer.missed { border-color: var(--mud-palette-warning); color: var(--mud-palette-warning); }
 
 .cal-agenda { display: none; }
 

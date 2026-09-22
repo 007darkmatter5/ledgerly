@@ -30,6 +30,9 @@ public sealed class LedgerServiceTests : IAsyncLifetime
     private static Account Checking(string name = "Checking") =>
         new() { Name = name, Type = AccountType.Checking, Balance = 1000m, BalanceAsOf = new DateOnly(2026, 9, 1) };
 
+    private static Transfer NewTransfer(string name, int from, int to) =>
+        new() { Name = name, Amount = 200m, StartDate = new DateOnly(2026, 9, 5), FromAccountId = from, ToAccountId = to };
+
     [Fact]
     public async Task Users_only_see_their_own_data()
     {
@@ -318,6 +321,84 @@ public sealed class LedgerServiceTests : IAsyncLifetime
         var bill = Assert.Single(await alice.GetBillsAsync());
         Assert.Null(bill.CategoryId);
         Assert.Empty(await alice.GetCategoriesAsync());
+    }
+
+    [Fact]
+    public async Task Transfers_are_private_and_must_move_money_between_two_of_the_ledgers_own_bank_accounts()
+    {
+        var alice = ServiceFor("alice");
+        var checking = Checking("Alice checking");
+        var savings = new Account { Name = "Alice savings", Type = AccountType.Savings, Balance = 100m, BalanceAsOf = new DateOnly(2026, 9, 1) };
+        var card = new Account { Name = "Alice card", Type = AccountType.CreditCard, Balance = -50m, BalanceAsOf = new DateOnly(2026, 9, 1) };
+        await alice.SaveAccountAsync(checking);
+        await alice.SaveAccountAsync(savings);
+        await alice.SaveAccountAsync(card);
+
+        var transfer = NewTransfer(" To savings ", checking.Id, savings.Id);
+        await alice.SaveTransferAsync(transfer);
+        Assert.Equal("To savings", Assert.Single(await alice.GetTransfersAsync()).Name);
+
+        // The same account at both ends, a blank name, and a credit card at either end are all rejected.
+        await Assert.ThrowsAsync<LedgerValidationException>(() => alice.SaveTransferAsync(NewTransfer("Loop", checking.Id, checking.Id)));
+        await Assert.ThrowsAsync<LedgerValidationException>(() => alice.SaveTransferAsync(NewTransfer("   ", checking.Id, savings.Id)));
+        await Assert.ThrowsAsync<LedgerValidationException>(() => alice.SaveTransferAsync(NewTransfer("Card", checking.Id, card.Id)));
+        await Assert.ThrowsAsync<LedgerValidationException>(() => alice.SaveTransferAsync(NewTransfer("Cash advance", card.Id, checking.Id)));
+
+        // Bob can't see it, point one at Alice's accounts, edit hers, record against it, or delete it.
+        var bob = ServiceFor("bob");
+        Assert.Empty(await bob.GetTransfersAsync());
+        await Assert.ThrowsAsync<InvalidOperationException>(() => bob.SaveTransferAsync(NewTransfer("Sneaky", checking.Id, savings.Id)));
+
+        var hijack = transfer.Copy();
+        hijack.Name = "Hacked";
+        await Assert.ThrowsAsync<InvalidOperationException>(() => bob.SaveTransferAsync(hijack));
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            bob.RecordTransferOccurrenceAsync(transfer.Id, new DateOnly(2026, 9, 5), 10m, null));
+        await bob.DeleteTransferAsync(transfer.Id);
+
+        Assert.Equal(["To savings"], (await ServiceFor("alice").GetTransfersAsync()).Select(t => t.Name));
+    }
+
+    [Fact]
+    public async Task Recording_a_transfer_keeps_one_row_per_date_and_clears_it_when_nothing_is_left()
+    {
+        var alice = ServiceFor("alice");
+        var checking = Checking();
+        var savings = new Account { Name = "Savings", Type = AccountType.Savings, Balance = 0m, BalanceAsOf = new DateOnly(2026, 9, 1) };
+        await alice.SaveAccountAsync(checking);
+        await alice.SaveAccountAsync(savings);
+
+        var transfer = NewTransfer("To savings", checking.Id, savings.Id);
+        await alice.SaveTransferAsync(transfer);
+
+        var date = new DateOnly(2026, 9, 5);
+        await alice.RecordTransferOccurrenceAsync(transfer.Id, date, 250m, date.AddDays(1), "Bonus");
+        await alice.RecordTransferOccurrenceAsync(transfer.Id, date, 275m, date.AddDays(1), "Bonus");
+
+        var occurrence = Assert.Single(Assert.Single(await alice.GetTransfersAsync()).Occurrences);
+        Assert.Equal(275m, occurrence.Amount);
+        Assert.Equal(date.AddDays(1), occurrence.CompletedOn);
+
+        await alice.RecordTransferOccurrenceAsync(transfer.Id, date, null, null, null);
+        Assert.Empty(Assert.Single(await alice.GetTransfersAsync()).Occurrences);
+    }
+
+    [Fact]
+    public async Task Deleting_an_account_deletes_the_transfers_that_need_it()
+    {
+        var alice = ServiceFor("alice");
+        var checking = Checking();
+        var savings = new Account { Name = "Savings", Type = AccountType.Savings, Balance = 0m, BalanceAsOf = new DateOnly(2026, 9, 1) };
+        await alice.SaveAccountAsync(checking);
+        await alice.SaveAccountAsync(savings);
+
+        var transfer = NewTransfer("To savings", checking.Id, savings.Id);
+        await alice.SaveTransferAsync(transfer);
+        await alice.RecordTransferOccurrenceAsync(transfer.Id, new DateOnly(2026, 9, 5), null, new DateOnly(2026, 9, 5));
+
+        await alice.DeleteAccountAsync(savings.Id);
+
+        Assert.Empty(await alice.GetTransfersAsync());
     }
 
     [Fact]

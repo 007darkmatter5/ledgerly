@@ -127,7 +127,7 @@ else if (belowThreshold is not null)
                     <span>@context.Description</span>
                     @if (context.IsPaid)
                     {
-                        <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Outlined">Paid</MudChip>
+                        <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Outlined">@(IsTransferEntry(context) ? "Moved" : "Paid")</MudChip>
                     }
                     else if (context.Kind == ProjectionEntryKind.Bill && context.Date < Ledger.Today)
                     {
@@ -147,7 +147,7 @@ else if (belowThreshold is not null)
             <MudTd DataLabel="Balance" Style="text-align:right"><strong><Money Value="context.RunningBalance" /></strong></MudTd>
         </RowTemplate>
         <NoRecordsContent>
-            <MudText Class="py-6 mud-text-secondary">No bills or income in this period.</MudText>
+            <MudText Class="py-6 mud-text-secondary">No bills, income or transfers in this period.</MudText>
         </NoRecordsContent>
     </MudTable>
 </MudPaper>
@@ -155,12 +155,16 @@ else if (belowThreshold is not null)
 @code {
     private static readonly int[] DayOptions = [30, 60, 90, 180, 365];
 
+    private static bool IsTransferEntry(ProjectionEntry entry) =>
+        entry.Kind is ProjectionEntryKind.TransferOut or ProjectionEntryKind.TransferIn;
+
     [SupplyParameterFromQuery(Name = "accounts")] private string? AccountsQuery { get; set; }
 
     private bool _loading = true;
     private List<Account> _accounts = [];
     private List<Bill> _bills = [];
     private List<Income> _incomes = [];
+    private List<Transfer> _transfers = [];
     private IReadOnlyCollection<int> _selected = [];
     private int _days = 60;
     private ProjectionMode _mode = ProjectionMode.Expected;
@@ -186,6 +190,7 @@ else if (belowThreshold is not null)
         _accounts = await Ledger.GetAccountsAsync(activeOnly: true);
         _bills = await Ledger.GetBillsAsync();
         _incomes = await Ledger.GetIncomesAsync();
+        _transfers = await Ledger.GetTransfersAsync();
         _unassignedBills = _bills.Count(b => b.IsActive && b.PayFromAccountId is null);
 
         var ledger = await Ledger.GetActiveLedgerAsync();
@@ -245,7 +250,7 @@ else if (belowThreshold is not null)
             return;
         }
 
-        _result = Projection.Build(accounts, _bills, _incomes, Ledger.Today.AddDays(_days), _mode);
+        _result = Projection.Build(accounts, _bills, _incomes, _transfers, Ledger.Today.AddDays(_days), _mode);
         BuildChart(_result);
     }
 
