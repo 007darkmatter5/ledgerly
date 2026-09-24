@@ -56,8 +56,7 @@
                 var paid = context.OriginalPrincipal > 0 ? (double)((context.OriginalPrincipal - balance) / context.OriginalPrincipal * 100m) : 0;
             }
             <MudTd DataLabel="Loan">
-                <MudText Class="@(context.IsActive ? null : "mud-text-disabled")">@context.Name</MudText>
-                <LedgerTag LedgerId="context.LedgerId" />
+                <MudText Class="@(context.IsActive ? null : "mud-text-disabled")">@context.Name <LedgerTag LedgerId="context.LedgerId" /></MudText>
                 <MudText Typo="Typo.caption" Class="mud-text-secondary">
                     @Display.Of(context.Type)@(context.Lender is null ? "" : $" · {context.Lender.Name}")@(context.IsActive ? "" : " · Inactive")
                     <ExternalLink Url="@context.Lender?.WebsiteUrl" IconOnly="true" Title="@($"Open {context.Lender?.Name} website")" />

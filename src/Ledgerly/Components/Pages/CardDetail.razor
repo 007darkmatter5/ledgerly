@@ -22,8 +22,7 @@
 <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-4" Wrap="Wrap.Wrap">
     <MudStack Spacing="0">
         <MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center">
-            <MudText Typo="Typo.h4">@_card.Name</MudText>
-            <LedgerTag LedgerId="_card.LedgerId" />
+            <MudText Typo="Typo.h4">@_card.Name <LedgerTag LedgerId="_card.LedgerId" /></MudText>
         </MudStack>
         <MudText Typo="Typo.body2" Class="mud-text-secondary">
             @(_card.CreditLimit is { } limit ? $"{limit:C0} limit" : "No limit set")

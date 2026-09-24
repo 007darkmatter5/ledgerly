@@ -39,8 +39,7 @@
             </HeaderContent>
             <RowTemplate>
                 <MudTd DataLabel="Transfer">
-                    <MudText Class="@(context.IsActive ? null : "mud-text-disabled")">@context.Name</MudText>
-                    <LedgerTag LedgerId="context.LedgerId" />
+                    <MudText Class="@(context.IsActive ? null : "mud-text-disabled")">@context.Name <LedgerTag LedgerId="context.LedgerId" /></MudText>
                     <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center">
                         @if (context.IsAutomatic)
                         {

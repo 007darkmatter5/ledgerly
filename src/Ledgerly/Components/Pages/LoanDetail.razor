@@ -23,8 +23,7 @@
 <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-4" Wrap="Wrap.Wrap">
     <MudStack Spacing="0">
         <MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center">
-            <MudText Typo="Typo.h4">@_loan.Name</MudText>
-            <LedgerTag LedgerId="_loan.LedgerId" />
+            <MudText Typo="Typo.h4">@_loan.Name <LedgerTag LedgerId="_loan.LedgerId" /></MudText>
         </MudStack>
         <MudText Typo="Typo.body2" Class="mud-text-secondary">
             @Display.Of(_loan.Type)

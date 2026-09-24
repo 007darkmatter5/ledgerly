@@ -32,17 +32,16 @@
                     <MudStack Spacing="0">
                         @if (context.IsCreditCard)
                         {
-                            <MudLink Href="@($"cards/{context.Id}")" Typo="Typo.body1" Class="@(context.IsActive ? null : "mud-text-disabled")">@context.Name</MudLink>
+                            <MudLink Href="@($"cards/{context.Id}")" Typo="Typo.body1" Class="@(context.IsActive ? null : "mud-text-disabled")">@context.Name <LedgerTag LedgerId="context.LedgerId" /></MudLink>
                         }
                         else
                         {
-                            <MudText Typo="Typo.body1" Class="@(context.IsActive ? null : "mud-text-disabled")">@context.Name</MudText>
+                            <MudText Typo="Typo.body1" Class="@(context.IsActive ? null : "mud-text-disabled")">@context.Name <LedgerTag LedgerId="context.LedgerId" /></MudText>
                         }
                         @if (!context.IsActive)
                         {
                             <MudText Typo="Typo.caption">Inactive</MudText>
                         }
-                        <LedgerTag LedgerId="context.LedgerId" />
                     </MudStack>
                 </MudStack>
             </MudTd>

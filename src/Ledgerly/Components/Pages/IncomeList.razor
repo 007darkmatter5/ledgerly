@@ -27,8 +27,7 @@
         </HeaderContent>
         <RowTemplate>
             <MudTd DataLabel="Income">
-                <MudText Class="@(context.IsActive ? null : "mud-text-disabled")">@context.Name</MudText>
-                <LedgerTag LedgerId="context.LedgerId" />
+                <MudText Class="@(context.IsActive ? null : "mud-text-disabled")">@context.Name <LedgerTag LedgerId="context.LedgerId" /></MudText>
                 @if (!context.IsActive)
                 {
                     <MudText Typo="Typo.caption">Inactive</MudText>

@@ -63,9 +63,8 @@
             </HeaderContent>
             <RowTemplate>
                 <MudTd DataLabel="Bill">
-                    <MudText Typo="Typo.body1" Class="@(context.IsActive ? null : "mud-text-disabled")">@context.Name</MudText>
+                    <MudText Typo="Typo.body1" Class="@(context.IsActive ? null : "mud-text-disabled")">@context.Name <LedgerTag LedgerId="context.LedgerId" /></MudText>
                     <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center" Wrap="Wrap.Wrap">
-                        <LedgerTag LedgerId="context.LedgerId" />
                         @if (context.Payee is { } payee)
                         {
                             <MudText Typo="Typo.caption" Class="mud-text-secondary">@payee.Name</MudText>

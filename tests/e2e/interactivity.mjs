@@ -193,7 +193,9 @@ try {
   await other.goto(`${base}/transactions`);
   const sharedRow = await other.waitForSelector('.mud-table-body tr:has-text("E2E Dinner out")', { timeout: 10000 }).then((h) => h, () => null);
   const sharedText = sharedRow === null ? '' : await sharedRow.innerText();
-  const tagged = sharedText.includes("e2e@example.com's ledger");
+  // The tag is a lock icon; the ledger's name is in its label.
+  const tagged = await other.locator('.mud-table-body tr', { hasText: 'E2E Dinner out' })
+    .locator(`.ledger-tag[aria-label*="e2e@example.com's ledger"]`).count() > 0;
   note(`shared transaction shown with its ledger tag: ${tagged}`);
   if (!tagged) { note(`FAIL: shared transaction missing or untagged: ${sharedText}`); failed = true; }
   if (sharedRow !== null) {

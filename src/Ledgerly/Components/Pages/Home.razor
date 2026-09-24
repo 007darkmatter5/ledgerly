@@ -95,8 +95,7 @@ else
                                     <MudAvatar Color="Color.Primary" Variant="Variant.Outlined"><MudIcon Icon="@Display.Icon(account.Type)" /></MudAvatar>
                                 </CardHeaderAvatar>
                                 <CardHeaderContent>
-                                    <MudText Typo="Typo.subtitle1">@account.Name</MudText>
-                                    <LedgerTag LedgerId="account.LedgerId" />
+                                    <MudText Typo="Typo.subtitle1">@account.Name <LedgerTag LedgerId="account.LedgerId" /></MudText>
                                     <MudText Typo="Typo.caption" Class="@(stale ? "mud-warning-text" : "mud-text-secondary")">
                                         Balance as of @Display.Date(account.BalanceAsOf)@(stale ? " · update it?" : "")
                                     </MudText>

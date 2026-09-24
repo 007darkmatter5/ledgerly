@@ -1,18 +1,12 @@
-@* Marks something that belongs to a ledger shared with the user: their color, the ledger's name, and a lock when
-   it's view only. Renders nothing for the user's own ledger. *@
+@* Marks something that belongs to a ledger shared with the user: a small lock (or dot, once editing is allowed) in
+   the ledger's color, placed after its name. The ledger and owner are in the tooltip and the screen-reader label.
+   Renders nothing for the user's own ledger. *@
 @if (Scope?.SharedFor(LedgerId) is { } shared)
 {
-    <MudTooltip Text="@($"Shared by {shared.OwnerName}{(shared.IsReadOnly ? " · view only" : "")}")">
-        <span class="ledger-tag" style="@($"--ledger-color:{shared.Color}")">
-            @if (shared.IsReadOnly)
-            {
-                <MudIcon Icon="@Icons.Material.Filled.Lock" Style="font-size:0.8rem" />
-            }
-            else
-            {
-                <span class="ledger-dot"></span>
-            }
-            @shared.Name
+    var label = $"{shared.Name}, shared by {shared.OwnerName}{(shared.IsReadOnly ? ", view only" : "")}";
+    <MudTooltip Text="@label">
+        <span class="ledger-tag" style="@($"--ledger-color:{shared.Color}")" role="img" aria-label="@label">
+            <MudIcon Icon="@(shared.IsReadOnly ? Icons.Material.Filled.Lock : Icons.Material.Filled.People)" Style="font-size:0.95rem" />
         </span>
     </MudTooltip>
 }

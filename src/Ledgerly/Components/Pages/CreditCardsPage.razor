@@ -63,8 +63,7 @@
                         <MudAvatar Color="Color.Primary" Variant="Variant.Outlined"><MudIcon Icon="@Icons.Material.Filled.CreditCard" /></MudAvatar>
                     </CardHeaderAvatar>
                     <CardHeaderContent>
-                        <MudText Typo="Typo.subtitle1" Class="@(card.IsActive ? null : "mud-text-disabled")">@card.Name</MudText>
-                        <LedgerTag LedgerId="card.LedgerId" />
+                        <MudText Typo="Typo.subtitle1" Class="@(card.IsActive ? null : "mud-text-disabled")">@card.Name <LedgerTag LedgerId="card.LedgerId" /></MudText>
                         <MudText Typo="Typo.caption" Class="mud-text-secondary">
                             @(card.AprPercent is { } apr ? $"{apr:0.##}% APR" : "No APR set")@(card.IsActive ? "" : " · Inactive")
                         </MudText>
