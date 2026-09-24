@@ -104,7 +104,7 @@
                         <MudButton Size="Size.Small" Color="Color.Error" OnClick="() => LeaveAsync(shared)">Leave</MudButton>
                     </MudStack>
                     <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Wrap="Wrap.Wrap" Class="mt-2">
-                        <MudTextField @bind-Value="draft.Nickname" Label="Name it" Placeholder="@($"{shared.OwnerName}'s ledger")" MaxLength="100"
+                        <MudTextField @bind-Value="draft.Nickname" Label="Name it" Placeholder="@shared.DefaultName" MaxLength="100"
                                       Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:200px" />
                         <div class="d-flex gap-1" role="radiogroup" aria-label="Color">
                             @foreach (var color in LedgerService.LayerColors)
@@ -114,7 +114,7 @@
                             }
                         </div>
                         <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Primary" OnClick="() => SaveLayerAsync(shared, draft)"
-                                   Disabled="@(draft.Nickname == (shared.Name == $"{shared.OwnerName}'s ledger" ? null : shared.Name) && draft.Color == shared.Color)">Save</MudButton>
+                                   Disabled="@(draft.Nickname == shared.Nickname && draft.Color == shared.Color)">Save</MudButton>
                     </MudStack>
                 </MudPaper>
             }
@@ -154,7 +154,7 @@
         _invitations = await Ledger.GetInvitationsAsync();
         _drafts = _scope.Shared.ToDictionary(s => s.MemberId, s => new LayerDraft
         {
-            Nickname = s.Name == $"{s.OwnerName}'s ledger" ? null : s.Name,
+            Nickname = s.Nickname,
             Color = s.Color
         });
         _loading = false;

@@ -195,7 +195,7 @@ try {
   const sharedText = sharedRow === null ? '' : await sharedRow.innerText();
   // The tag is a lock icon; the ledger's name is in its label.
   const tagged = await other.locator('.mud-table-body tr', { hasText: 'E2E Dinner out' })
-    .locator(`.ledger-tag[aria-label*="e2e@example.com's ledger"]`).count() > 0;
+    .locator(`.ledger-tag[aria-label*="e2e's ledger, shared by e2e@example.com"]`).count() > 0;
   note(`shared transaction shown with its ledger tag: ${tagged}`);
   if (!tagged) { note(`FAIL: shared transaction missing or untagged: ${sharedText}`); failed = true; }
   if (sharedRow !== null) {
@@ -207,7 +207,7 @@ try {
   }
 
   await other.click('button[aria-label="Ledgers"]');
-  await other.click(".ledgers-menu >> text=e2e@example.com's ledger");
+  await other.click(".ledgers-menu >> text=e2e's ledger");
   const hidden = await other.waitForSelector('.mud-table-body tr:has-text("E2E Dinner out")', { state: 'detached', timeout: 10000 }).then(() => true, () => false);
   note(`switching the shared ledger off hides its data: ${hidden}`);
   if (!hidden) { note('FAIL: the shared transaction is still shown after switching the ledger off'); failed = true; }

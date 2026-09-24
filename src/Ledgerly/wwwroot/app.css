@@ -30,7 +30,12 @@ h1:focus {
 
 .appbar-button:hover { background: rgb(255 255 255 / 0.08); }
 .appbar-button:focus-visible { outline: 2px solid #fff; outline-offset: -2px; }
-.ledgers-menu { min-width: 300px; max-width: 420px; }
+.ledgers-menu { width: 300px; max-width: calc(100vw - 32px); }
+.ledgers-menu-row { display: flex; align-items: center; gap: 12px; min-width: 0; width: 100%; padding: 6px 16px; }
+.ledgers-menu-text { flex: 1; min-width: 0; line-height: 1.3; }
+.ledgers-menu-name, .ledgers-menu-sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ledgers-menu-sub { font-size: 0.75rem; color: var(--mud-palette-text-secondary); }
+.ledgers-menu .ledger-check { color: var(--ledger-color); }
 
 /* Links to outside websites (lenders). */
 .external-link {

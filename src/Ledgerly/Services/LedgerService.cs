@@ -612,8 +612,8 @@ public class LedgerService(IDbContextFactory<LedgerlyDbContext> dbFactory, ICurr
 
         var shared = rows.OrderBy(r => r.AcceptedAt).Select((r, i) =>
         {
-            var owner = ApplicationUser.NameOf(r.DisplayName, r.Email);
-            return new SharedLedger(r.Id, r.LedgerId, r.Nickname ?? $"{owner}'s ledger", owner, r.Color ?? LayerColors[i % LayerColors.Length], r.Role, r.IsVisible);
+            var defaultName = $"{ApplicationUser.ShortNameOf(r.DisplayName, r.Email)}'s ledger";
+            return new SharedLedger(r.Id, r.LedgerId, r.Nickname, defaultName, ApplicationUser.NameOf(r.DisplayName, r.Email), r.Color ?? LayerColors[i % LayerColors.Length], r.Role, r.IsVisible);
         }).ToList();
         return new LedgerScope { HomeLedgerId = home.Id, HomeIsSample = home.IsSample, Shared = shared };
     }

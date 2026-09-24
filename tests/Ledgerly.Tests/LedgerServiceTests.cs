@@ -682,7 +682,7 @@ public sealed class LedgerServiceTests : IAsyncLifetime
         Assert.Equal(["bob", "alice"], notified);
 
         var shared = Assert.Single((await bob.GetScopeAsync()).Shared);
-        Assert.Equal(("alice@example.com's ledger", LedgerService.LayerColors[0], true, true), (shared.Name, shared.Color, shared.IsVisible, shared.IsReadOnly));
+        Assert.Equal(("alice's ledger", "alice@example.com", LedgerService.LayerColors[0], true, true), (shared.Name, shared.OwnerName, shared.Color, shared.IsVisible, shared.IsReadOnly));
         Assert.Equal(["Alice rent"], (await bob.GetBillsAsync(includeShared: true)).Select(b => b.Name));
         Assert.Empty(await bob.GetBillsAsync());
         Assert.Empty(await bob.GetInvitationsAsync());
@@ -778,7 +778,7 @@ public sealed class LedgerServiceTests : IAsyncLifetime
         await carol.StopSharingAsync(memberId);
         await bob.StopSharingAsync(memberId);
         var shared = Assert.Single((await bob.GetScopeAsync()).Shared);
-        Assert.Equal(("alice@example.com's ledger", true), (shared.Name, shared.IsVisible));
+        Assert.Equal(("alice's ledger", true), (shared.Name, shared.IsVisible));
     }
 
     [Fact]

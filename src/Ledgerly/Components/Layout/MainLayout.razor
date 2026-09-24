@@ -46,28 +46,34 @@
                     </MudTooltip>
                 </ActivatorContent>
                 <ChildContent>
-                    <div class="px-4 pt-2 pb-1">
+                    <div class="px-4 pt-2 pb-2">
                         <MudText Typo="Typo.subtitle2">Ledgers</MudText>
-                        <MudText Typo="Typo.caption" Class="mud-text-secondary">Switch on ledgers shared with you to see them alongside yours.</MudText>
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary">Choose which to show alongside yours.</MudText>
                     </div>
-                    <MudMenuItem Icon="@Icons.Material.Filled.CheckBox" IconColor="Color.Primary" Disabled="true">
-                        @(_ledger?.IsSample == true ? "Sample data" : "My ledger") <span class="mud-text-secondary">· always shown</span>
-                    </MudMenuItem>
+                    <div class="ledgers-menu-row">
+                        <MudIcon Icon="@Icons.Material.Filled.CheckBox" Color="Color.Primary" />
+                        <div class="ledgers-menu-text">
+                            <div class="ledgers-menu-name">@(_ledger?.IsSample == true ? "Sample data" : "My ledger")</div>
+                            <div class="ledgers-menu-sub">Always shown</div>
+                        </div>
+                    </div>
                     @if (_ledger?.IsSample == true && _scope.Shared.Count > 0)
                     {
-                        <MudText Typo="Typo.caption" Class="px-4 d-block mud-text-secondary">Shared ledgers are hidden while you explore sample data.</MudText>
+                        <MudText Typo="Typo.caption" Class="px-4 pb-2 d-block mud-text-secondary">Shared ledgers are hidden while you explore sample data.</MudText>
                     }
                     else
                     {
                         @foreach (var shared in _scope.Shared)
                         {
-                            <MudMenuItem AutoClose="false" OnClick="() => SetVisibleAsync(shared.MemberId, !shared.IsVisible)"
-                                         Icon="@(shared.IsVisible ? Icons.Material.Filled.CheckBox : Icons.Material.Filled.CheckBoxOutlineBlank)">
-                                <span class="d-inline-flex align-center gap-2" aria-label="@($"{shared.Name}, shared by {shared.OwnerName}, {(shared.IsVisible ? "shown" : "hidden")}")">
-                                    <span class="ledger-dot" style="@($"--ledger-color:{shared.Color}")"></span>
-                                    <span>@shared.Name</span>
-                                    <span class="mud-text-secondary">· @shared.OwnerName@(shared.IsReadOnly ? " · view only" : "")</span>
-                                </span>
+                            <MudMenuItem AutoClose="false" OnClick="() => SetVisibleAsync(shared.MemberId, !shared.IsVisible)">
+                                <div class="ledgers-menu-row p-0" style="@($"--ledger-color:{shared.Color}")" title="@($"{shared.Name}, shared by {shared.OwnerName}")"
+                                     role="checkbox" aria-checked="@(shared.IsVisible ? "true" : "false")" aria-label="@($"{shared.Name}, shared by {shared.OwnerName}")">
+                                    <MudIcon Icon="@(shared.IsVisible ? Icons.Material.Filled.CheckBox : Icons.Material.Filled.CheckBoxOutlineBlank)" Class="ledger-check" />
+                                    <div class="ledgers-menu-text">
+                                        <div class="ledgers-menu-name">@shared.Name</div>
+                                        <div class="ledgers-menu-sub">@shared.OwnerName@(shared.IsReadOnly ? " · view only" : "")</div>
+                                    </div>
+                                </div>
                             </MudMenuItem>
                         }
                         @if (_scope.Shared.Count > 1)

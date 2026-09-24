@@ -3,8 +3,12 @@ using Ledgerly.Data;
 namespace Ledgerly.Services;
 
 /// <summary>A ledger someone else shared with the signed-in user, with the layer settings they chose for it.</summary>
-public sealed record SharedLedger(int MemberId, int LedgerId, string Name, string OwnerName, string Color, LedgerRole Role, bool IsVisible)
+/// <param name="Nickname">What the user renamed it to, if they did.</param>
+/// <param name="DefaultName">"Owner's ledger", from the owner's display name or the start of their email.</param>
+public sealed record SharedLedger(int MemberId, int LedgerId, string? Nickname, string DefaultName, string OwnerName, string Color, LedgerRole Role, bool IsVisible)
 {
+    public string Name => Nickname ?? DefaultName;
+
     public bool IsReadOnly => Role == LedgerRole.Viewer;
 }
 

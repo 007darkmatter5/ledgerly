@@ -13,4 +13,8 @@ public class ApplicationUser : IdentityUser
     /// <summary>How other users see this person: their display name, else their email.</summary>
     public static string NameOf(string? displayName, string? email) =>
         string.IsNullOrWhiteSpace(displayName) ? email ?? "Someone" : displayName;
+
+    /// <summary>A short form for naming things after the user: their display name, else the part of their email before the @.</summary>
+    public static string ShortNameOf(string? displayName, string? email) =>
+        !string.IsNullOrWhiteSpace(displayName) ? displayName : email?.Split('@')[0] is { Length: > 0 } local ? local : "Someone";
 }
