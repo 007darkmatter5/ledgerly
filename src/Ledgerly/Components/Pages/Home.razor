@@ -67,7 +67,7 @@ else
         <MudItem xs="12" sm="6" lg="3">
             <StatCard Label="Loan balances" Icon="@Icons.Material.Filled.RealEstateAgent" Href="loans">
                 <Value><Money Value="_loans.Sum(l => LoanMath.CurrentBalance(l, Ledger.Today, ExtrasFor(l)))" Colored="false" /></Value>
-                <Caption>@_loans.Sum(l => LoanMath.Payment(l) + l.ExtraPrincipal).ToString("C") / month@SharedNote</Caption>
+                <Caption>@_loans.Sum(l => LoanMath.Payment(l) + l.ExtraPrincipal).ToString("C") / month@(SharedNote)</Caption>
             </StatCard>
         </MudItem>
 

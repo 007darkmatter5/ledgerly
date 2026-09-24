@@ -65,16 +65,24 @@
                     {
                         @foreach (var shared in _scope.Shared)
                         {
-                            <MudMenuItem AutoClose="false" OnClick="() => SetVisibleAsync(shared.MemberId, !shared.IsVisible)">
-                                <div class="ledgers-menu-row p-0" style="@($"--ledger-color:{shared.Color}")" title="@($"{shared.Name}, shared by {shared.OwnerName}")"
-                                     role="checkbox" aria-checked="@(shared.IsVisible ? "true" : "false")" aria-label="@($"{shared.Name}, shared by {shared.OwnerName}")">
-                                    <MudIcon Icon="@(shared.IsVisible ? Icons.Material.Filled.CheckBox : Icons.Material.Filled.CheckBoxOutlineBlank)" Class="ledger-check" />
-                                    <div class="ledgers-menu-text">
-                                        <div class="ledgers-menu-name">@shared.Name</div>
-                                        <div class="ledgers-menu-sub">@shared.OwnerName@(shared.IsReadOnly ? " · view only" : "")</div>
-                                    </div>
-                                </div>
-                            </MudMenuItem>
+                            @* A plain button rather than MudMenuItem, whose wrapper indents the row and won't let long names shrink. *@
+                            <button type="button" class="ledgers-menu-row ledgers-menu-toggle" style="@($"--ledger-color:{shared.Color}")"
+                                    title="@($"{shared.Name}, shared by {shared.OwnerName}{(shared.IsReadOnly ? ", view only" : "")}")"
+                                    role="checkbox" aria-checked="@(shared.IsVisible ? "true" : "false")"
+                                    aria-label="@($"{shared.Name}, shared by {shared.OwnerName}{(shared.IsReadOnly ? ", view only" : "")}")"
+                                    @onclick="() => SetVisibleAsync(shared.MemberId, !shared.IsVisible)">
+                                <MudIcon Icon="@(shared.IsVisible ? Icons.Material.Filled.CheckBox : Icons.Material.Filled.CheckBoxOutlineBlank)" Class="ledger-check" />
+                                <span class="ledgers-menu-text">
+                                    <span class="ledgers-menu-name">
+                                        <span class="ledgers-menu-ellipsis">@shared.Name</span>
+                                        @if (shared.IsReadOnly)
+                                        {
+                                            <MudIcon Icon="@Icons.Material.Filled.Lock" Class="ledgers-menu-lock" />
+                                        }
+                                    </span>
+                                    <span class="ledgers-menu-sub">@shared.OwnerName</span>
+                                </span>
+                            </button>
                         }
                         @if (_scope.Shared.Count > 1)
                         {
