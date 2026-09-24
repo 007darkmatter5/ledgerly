@@ -197,7 +197,8 @@ try {
   note(`shared transaction shown with its ledger tag: ${tagged}`);
   if (!tagged) { note(`FAIL: shared transaction missing or untagged: ${sharedText}`); failed = true; }
   if (sharedRow !== null) {
-    await sharedRow.click();
+    // A locator, not the handle: the table re-renders once the page's live connection starts.
+    await other.locator('.mud-table-body tr', { hasText: 'E2E Dinner out' }).click();
     const opened = await other.waitForSelector('.mud-dialog', { timeout: 2000 }).then(() => true, () => false);
     note(`shared transaction is read-only (no edit dialog): ${!opened}`);
     if (opened) { note('FAIL: a shared transaction opened for editing'); failed = true; }
