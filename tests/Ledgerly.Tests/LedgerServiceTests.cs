@@ -18,14 +18,17 @@ public sealed class LedgerServiceTests : IAsyncLifetime
         await using var db = _factory.CreateDbContext();
         await db.Database.EnsureCreatedAsync();
         db.Users.AddRange(
-            new ApplicationUser { Id = "alice", UserName = "alice@example.com", Email = "alice@example.com" },
-            new ApplicationUser { Id = "bob", UserName = "bob@example.com", Email = "bob@example.com" });
+            new ApplicationUser { Id = "alice", UserName = "alice@example.com", Email = "alice@example.com", NormalizedEmail = "ALICE@EXAMPLE.COM" },
+            new ApplicationUser { Id = "bob", UserName = "bob@example.com", Email = "bob@example.com", NormalizedEmail = "BOB@EXAMPLE.COM" },
+            new ApplicationUser { Id = "carol", UserName = "carol@example.com", Email = "carol@example.com", NormalizedEmail = "CAROL@EXAMPLE.COM" });
         await db.SaveChangesAsync();
     }
 
     public async Task DisposeAsync() => await _connection.DisposeAsync();
 
-    private LedgerService ServiceFor(string userId) => new(_factory, new FixedUser(userId), TimeProvider.System);
+    private readonly SharingNotifier _notifier = new();
+
+    private LedgerService ServiceFor(string userId) => new(_factory, new FixedUser(userId), TimeProvider.System, notifier: _notifier);
 
     private static Account Checking(string name = "Checking") =>
         new() { Name = name, Type = AccountType.Checking, Balance = 1000m, BalanceAsOf = new DateOnly(2026, 9, 1) };
@@ -631,6 +634,211 @@ public sealed class LedgerServiceTests : IAsyncLifetime
         Assert.Equal(0, await check.Ledgers.CountAsync(l => l.OwnerId == "alice"));
         Assert.Equal(["Bob checking"], await check.Accounts.Select(a => a.Name).ToListAsync());
         Assert.Equal(0, await check.Bills.CountAsync());
+    }
+
+    // Sharing
+
+    /// <summary>Alice's ledger with a checking account and a rent bill, shared with and accepted by Bob.</summary>
+    private async Task<(Account Checking, Bill Rent)> AliceSharesWithBobAsync()
+    {
+        var alice = ServiceFor("alice");
+        var checking = Checking("Alice checking");
+        await alice.SaveAccountAsync(checking);
+        var rent = new Bill { Name = "Alice rent", ExpectedAmount = 900m, StartDate = new DateOnly(2026, 9, 1), PayFromAccountId = checking.Id };
+        await alice.SaveBillAsync(rent);
+        await alice.ShareAsync("bob@example.com");
+
+        var bob = ServiceFor("bob");
+        await bob.RespondToInvitationAsync(Assert.Single(await bob.GetInvitationsAsync()).MemberId, accept: true);
+        return (checking, rent);
+    }
+
+    [Fact]
+    public async Task Sharing_needs_an_existing_account_and_shows_nothing_until_accepted()
+    {
+        var alice = ServiceFor("alice");
+        await alice.SaveBillAsync(new Bill { Name = "Alice rent", ExpectedAmount = 900m, StartDate = new DateOnly(2026, 9, 1) });
+
+        await Assert.ThrowsAsync<LedgerValidationException>(() => alice.ShareAsync("  "));
+        await Assert.ThrowsAsync<LedgerValidationException>(() => alice.ShareAsync("nobody@example.com"));
+        await Assert.ThrowsAsync<LedgerValidationException>(() => alice.ShareAsync("ALICE@example.com"));
+
+        var notified = new List<string>();
+        _notifier.Changed += notified.Add;
+        await alice.ShareAsync(" Bob@Example.com ");
+        await Assert.ThrowsAsync<LedgerValidationException>(() => alice.ShareAsync("bob@example.com"));
+        Assert.Equal(["bob"], notified);
+
+        // Bob sees an invitation, but none of Alice's data yet.
+        var bob = ServiceFor("bob");
+        var invitation = Assert.Single(await bob.GetInvitationsAsync());
+        Assert.Equal(("alice@example.com", LedgerRole.Viewer), (invitation.OwnerName, invitation.Role));
+        Assert.Empty((await bob.GetScopeAsync()).Shared);
+        Assert.Empty(await bob.GetBillsAsync(includeShared: true));
+        var share = Assert.Single(await alice.GetSharesAsync());
+        Assert.Equal(("bob@example.com", false), (share.Email, share.IsAccepted));
+
+        await bob.RespondToInvitationAsync(invitation.MemberId, accept: true);
+        Assert.Equal(["bob", "alice"], notified);
+
+        var shared = Assert.Single((await bob.GetScopeAsync()).Shared);
+        Assert.Equal(("alice@example.com's ledger", LedgerService.LayerColors[0], true, true), (shared.Name, shared.Color, shared.IsVisible, shared.IsReadOnly));
+        Assert.Equal(["Alice rent"], (await bob.GetBillsAsync(includeShared: true)).Select(b => b.Name));
+        Assert.Empty(await bob.GetBillsAsync());
+        Assert.Empty(await bob.GetInvitationsAsync());
+        Assert.True(Assert.Single(await alice.GetSharesAsync()).IsAccepted);
+
+        // Carol, who it isn't shared with, still sees nothing.
+        Assert.Empty(await ServiceFor("carol").GetBillsAsync(includeShared: true));
+    }
+
+    [Fact]
+    public async Task A_shared_ledger_is_read_only()
+    {
+        var (aliceChecking, rent) = await AliceSharesWithBobAsync();
+        var bob = ServiceFor("bob");
+        var bobChecking = Checking("Bob checking");
+        await bob.SaveAccountAsync(bobChecking);
+
+        var hijack = rent.Copy();
+        hijack.ExpectedAmount = 1m;
+        await Assert.ThrowsAsync<InvalidOperationException>(() => bob.SaveBillAsync(hijack));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => bob.RecordOccurrenceAsync(rent.Id, new DateOnly(2026, 9, 1), 1m, new DateOnly(2026, 9, 1)));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => bob.MarkPaidAsync([(rent.Id, new DateOnly(2026, 9, 1))]));
+        await bob.DeleteBillAsync(rent.Id);
+        await bob.DeleteAccountAsync(aliceChecking.Id);
+
+        // Seeing Alice's account doesn't let Bob point his own things at it.
+        await Assert.ThrowsAsync<InvalidOperationException>(() => bob.SaveBillAsync(
+            new Bill { Name = "Sneaky", ExpectedAmount = 1m, StartDate = new DateOnly(2026, 9, 1), PayFromAccountId = aliceChecking.Id }));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => bob.SaveTransactionAsync(NewTransaction("Sneaky", aliceChecking.Id)));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => bob.SaveTransferAsync(NewTransfer("Sneaky", bobChecking.Id, aliceChecking.Id)));
+
+        var alice = ServiceFor("alice");
+        var bill = Assert.Single(await alice.GetBillsAsync());
+        Assert.Equal((900m, 0), (bill.ExpectedAmount, bill.Occurrences.Count));
+        Assert.Single(await alice.GetAccountsAsync());
+    }
+
+    [Fact]
+    public async Task Shared_ledgers_can_be_switched_off_and_access_ends_when_either_side_stops()
+    {
+        await AliceSharesWithBobAsync();
+        var bob = ServiceFor("bob");
+        var memberId = Assert.Single((await bob.GetScopeAsync()).Shared).MemberId;
+
+        await bob.SetSharedVisibleAsync(memberId, false);
+        Assert.False(Assert.Single((await bob.GetScopeAsync()).Shared).IsVisible);
+        Assert.Empty(await bob.GetBillsAsync(includeShared: true));
+        Assert.Empty(await bob.GetAccountsAsync(includeShared: true));
+
+        await bob.SetSharedVisibleAsync(null, true);
+        Assert.Single(await bob.GetBillsAsync(includeShared: true));
+
+        // Alice stops sharing: Bob loses access at once.
+        var alice = ServiceFor("alice");
+        await alice.StopSharingAsync(Assert.Single(await alice.GetSharesAsync()).MemberId);
+        Assert.Empty((await bob.GetScopeAsync()).Shared);
+        Assert.Empty(await bob.GetBillsAsync(includeShared: true));
+
+        // Shared again, Bob declines; shared again, Bob accepts and then leaves.
+        await alice.ShareAsync("bob@example.com");
+        await bob.RespondToInvitationAsync(Assert.Single(await bob.GetInvitationsAsync()).MemberId, accept: false);
+        Assert.Empty(await alice.GetSharesAsync());
+
+        await alice.ShareAsync("bob@example.com");
+        await bob.RespondToInvitationAsync(Assert.Single(await bob.GetInvitationsAsync()).MemberId, accept: true);
+        await bob.LeaveSharedLedgerAsync(Assert.Single((await bob.GetScopeAsync()).Shared).MemberId);
+        Assert.Empty(await alice.GetSharesAsync());
+        Assert.Empty(await bob.GetBillsAsync(includeShared: true));
+    }
+
+    [Fact]
+    public async Task Only_the_person_a_ledger_is_shared_with_can_answer_or_change_it()
+    {
+        var alice = ServiceFor("alice");
+        await alice.SaveBillAsync(new Bill { Name = "Alice rent", ExpectedAmount = 900m, StartDate = new DateOnly(2026, 9, 1) });
+        await alice.ShareAsync("bob@example.com");
+        var memberId = Assert.Single(await alice.GetSharesAsync()).MemberId;
+
+        // Carol can't accept Bob's invitation, and Alice can't accept on his behalf.
+        var carol = ServiceFor("carol");
+        await carol.RespondToInvitationAsync(memberId, accept: true);
+        await alice.RespondToInvitationAsync(memberId, accept: true);
+        Assert.False(Assert.Single(await alice.GetSharesAsync()).IsAccepted);
+        Assert.Empty(await carol.GetBillsAsync(includeShared: true));
+
+        var bob = ServiceFor("bob");
+        await bob.RespondToInvitationAsync(memberId, accept: true);
+
+        // Nobody else can switch it on or off, rename it, leave it for him, or stop someone else's sharing.
+        await carol.SetSharedVisibleAsync(memberId, false);
+        await carol.UpdateSharedLedgerAsync(memberId, "Mine now", null);
+        await carol.LeaveSharedLedgerAsync(memberId);
+        await carol.StopSharingAsync(memberId);
+        await bob.StopSharingAsync(memberId);
+        var shared = Assert.Single((await bob.GetScopeAsync()).Shared);
+        Assert.Equal(("alice@example.com's ledger", true), (shared.Name, shared.IsVisible));
+    }
+
+    [Fact]
+    public async Task Owners_are_named_and_shared_ledgers_can_be_renamed_and_recolored()
+    {
+        await ServiceFor("alice").SetDisplayNameAsync("  Alice  ");
+        await AliceSharesWithBobAsync();
+        var bob = ServiceFor("bob");
+        var shared = Assert.Single((await bob.GetScopeAsync()).Shared);
+        Assert.Equal(("Alice's ledger", "Alice"), (shared.Name, shared.OwnerName));
+
+        await bob.UpdateSharedLedgerAsync(shared.MemberId, " Household ", "#16A085");
+        Assert.Equal(("Household", "#16A085"), (Assert.Single((await bob.GetScopeAsync()).Shared) is var s ? (s.Name, s.Color) : default));
+        await Assert.ThrowsAsync<LedgerValidationException>(() => bob.UpdateSharedLedgerAsync(shared.MemberId, null, "red; background:url(x)"));
+
+        await bob.UpdateSharedLedgerAsync(shared.MemberId, "  ", "#16A085");
+        Assert.Equal("Alice's ledger", Assert.Single((await bob.GetScopeAsync()).Shared).Name);
+        await Assert.ThrowsAsync<LedgerValidationException>(() => bob.SetDisplayNameAsync(new string('x', 51)));
+    }
+
+    [Fact]
+    public async Task Sample_data_is_never_shared_and_hides_shared_ledgers()
+    {
+        var alice = ServiceFor("alice");
+        await alice.SaveAccountAsync(Checking("Alice real checking"));
+        await alice.StartSampleAsync();
+        await alice.ShareAsync("bob@example.com");
+
+        var bob = ServiceFor("bob");
+        await bob.RespondToInvitationAsync(Assert.Single(await bob.GetInvitationsAsync()).MemberId, accept: true);
+        Assert.Equal(["Alice real checking"], (await bob.GetAccountsAsync(includeShared: true)).Select(a => a.Name));
+
+        await bob.StartSampleAsync();
+        var sampleScope = await bob.GetScopeAsync();
+        Assert.False(sampleScope.HasVisibleShared);
+        Assert.DoesNotContain(await bob.GetAccountsAsync(includeShared: true), a => a.Name == "Alice real checking");
+    }
+
+    [Fact]
+    public async Task A_projection_can_include_a_shared_account()
+    {
+        var (aliceChecking, _) = await AliceSharesWithBobAsync();
+        var bob = ServiceFor("bob");
+
+        var result = await bob.ProjectAsync([aliceChecking.Id], new DateOnly(2026, 9, 30), includeShared: true);
+
+        Assert.Equal(1000m, result.StartingBalance);
+        Assert.Contains(result.Entries, e => e.Description == "Alice rent" && e.Amount == -900m);
+        Assert.Empty((await bob.ProjectAsync([aliceChecking.Id], new DateOnly(2026, 9, 30))).Accounts);
+    }
+
+    [Fact]
+    public async Task Deleting_either_user_ends_the_sharing()
+    {
+        await AliceSharesWithBobAsync();
+        await using (var db = _factory.CreateDbContext())
+            await db.Users.Where(u => u.Id == "bob").ExecuteDeleteAsync();
+
+        await using var check = _factory.CreateDbContext();
+        Assert.Equal(0, await check.LedgerMembers.CountAsync());
     }
 
     [Fact]

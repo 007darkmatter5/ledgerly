@@ -21,7 +21,7 @@
             <MudSelectItem T="int?" Value="null">All accounts</MudSelectItem>
             @foreach (var account in _accounts)
             {
-                <MudSelectItem T="int?" Value="account.Id">@account.Name</MudSelectItem>
+                <MudSelectItem T="int?" Value="account.Id">@account.Name <LedgerTag LedgerId="account.LedgerId" /></MudSelectItem>
             }
             <MudSelectItem T="int?" Value="0">Not assigned</MudSelectItem>
         </MudSelect>
@@ -50,7 +50,7 @@
 
 <MudTabs Elevation="1" Rounded="true" TabPanelsClass="pa-2" @bind-ActivePanelIndex="_tab">
     <MudTabPanel Text="All bills" Icon="@Icons.Material.Filled.List">
-        <MudTable Items="FilteredBills" Hover="true" Loading="_loading" Breakpoint="Breakpoint.Sm" Elevation="0">
+        <MudTable Items="FilteredBills" Hover="true" Loading="_loading" Breakpoint="Breakpoint.Sm" Elevation="0" RowStyleFunc="RowStyle">
             <HeaderContent>
                 <MudTh><MudTableSortLabel SortBy="_byName" InitialDirection="SortDirection.Ascending">Bill</MudTableSortLabel></MudTh>
                 <MudTh><MudTableSortLabel SortBy="_byCategory">Category</MudTableSortLabel></MudTh>
@@ -64,7 +64,8 @@
             <RowTemplate>
                 <MudTd DataLabel="Bill">
                     <MudText Typo="Typo.body1" Class="@(context.IsActive ? null : "mud-text-disabled")">@context.Name</MudText>
-                    <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center">
+                    <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center" Wrap="Wrap.Wrap">
+                        <LedgerTag LedgerId="context.LedgerId" />
                         @if (context.Payee is { } payee)
                         {
                             <MudText Typo="Typo.caption" Class="mud-text-secondary">@payee.Name</MudText>
@@ -128,12 +129,15 @@
                 </MudTd>
                 <MudTd DataLabel="Per month" Style="text-align:right">@Monthly(context).ToString("C")</MudTd>
                 <MudTd Style="text-align:right; white-space:nowrap">
-                    <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="() => EditAsync(context)" aria-label="Edit" />
-                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="() => DeleteAsync(context)" aria-label="Delete" />
+                    @if (Scope.IsHome(context.LedgerId))
+                    {
+                        <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="() => EditAsync(context)" aria-label="Edit" />
+                        <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="() => DeleteAsync(context)" aria-label="Delete" />
+                    }
                 </MudTd>
             </RowTemplate>
             <FooterContent>
-                <MudTd colspan="6" Style="text-align:right"><strong>Total per month (active)</strong></MudTd>
+                <MudTd colspan="6" Style="text-align:right"><strong>Total per month (active@(Scope.HasVisibleShared ? ", including shared" : ""))</strong></MudTd>
                 <MudTd Style="text-align:right"><strong>@FilteredBills.Where(b => b.IsActive).Sum(Monthly).ToString("C")</strong></MudTd>
                 <MudTd />
             </FooterContent>
@@ -169,6 +173,10 @@
 
     private bool _loading = true;
     private List<Bill> _bills = [];
+    [CascadingParameter] private LedgerScope Scope { get; set; } = LedgerScope.None;
+
+    private string RowStyle(Bill bill, int _) => Scope.RowStyle(bill.LedgerId);
+
     private List<Account> _accounts = [];
     private List<Category> _categories = [];
     private List<Payee> _payees = [];
@@ -200,8 +208,8 @@
     private IEnumerable<Bill> FilteredBills => _bills.Where(b =>
         (_showInactive || b.IsActive)
         && (_accountFilter is null || (b.PayFromAccountId ?? 0) == _accountFilter)
-        && (CategoryFilter is null || (b.CategoryId ?? 0) == CategoryFilter)
-        && (PayeeFilter is null || (b.PayeeId ?? 0) == PayeeFilter)
+        && NameFilter.Matches(b.Category, CategoryFilter, _categories)
+        && NameFilter.Matches(b.Payee, PayeeFilter, _payees)
         && (string.IsNullOrWhiteSpace(_search)
             || b.Name.Contains(_search, StringComparison.OrdinalIgnoreCase)
             || (b.Payee?.Name.Contains(_search, StringComparison.OrdinalIgnoreCase) ?? false)
@@ -224,8 +232,8 @@
     /// <summary>Transactions for the calendar. They have an account, category and payee like bills, so every filter applies.</summary>
     private IEnumerable<Transaction> FilteredTransactions => _transactions.Where(t =>
         (_accountFilter is null || t.AccountId == _accountFilter)
-        && (CategoryFilter is null || (t.CategoryId ?? 0) == CategoryFilter)
-        && (PayeeFilter is null || (t.PayeeId ?? 0) == PayeeFilter)
+        && NameFilter.Matches(t.Category, CategoryFilter, _categories)
+        && NameFilter.Matches(t.Payee, PayeeFilter, _payees)
         && (string.IsNullOrWhiteSpace(_search)
             || t.Description.Contains(_search, StringComparison.OrdinalIgnoreCase)
             || (t.Payee?.Name.Contains(_search, StringComparison.OrdinalIgnoreCase) ?? false)
@@ -273,13 +281,13 @@
 
     private async Task LoadAsync()
     {
-        _bills = await Ledger.GetBillsAsync();
-        _accounts = await Ledger.GetAccountsAsync();
-        _categories = await Ledger.GetCategoriesAsync();
-        _payees = await Ledger.GetPayeesAsync();
-        _incomes = await Ledger.GetIncomesAsync();
-        _transfers = await Ledger.GetTransfersAsync();
-        _transactions = await Ledger.GetTransactionsAsync();
+        _bills = await Ledger.GetBillsAsync(includeShared: true);
+        _accounts = await Ledger.GetAccountsAsync(includeShared: true);
+        _categories = NameFilter.Choices(await Ledger.GetCategoriesAsync(includeShared: true), Scope.HomeLedgerId);
+        _payees = NameFilter.Choices(await Ledger.GetPayeesAsync(includeShared: true), Scope.HomeLedgerId);
+        _incomes = await Ledger.GetIncomesAsync(includeShared: true);
+        _transfers = await Ledger.GetTransfersAsync(includeShared: true);
+        _transactions = await Ledger.GetTransactionsAsync(includeShared: true);
         _loading = false;
     }
 

@@ -39,7 +39,7 @@
 
 <MudPaper Elevation="1">
     <MudTable Items="_loans" Hover="true" Loading="_loading" Breakpoint="Breakpoint.Sm" Elevation="0"
-              OnRowClick="@((TableRowClickEventArgs<Loan> e) => Navigation.NavigateTo($"loans/{e.Item!.Id}"))" RowStyle="cursor:pointer">
+              OnRowClick="@((TableRowClickEventArgs<Loan> e) => Navigation.NavigateTo($"loans/{e.Item!.Id}"))" RowStyleFunc="RowStyle">
         <HeaderContent>
             <MudTh>Loan</MudTh>
             <MudTh Style="text-align:right">Balance</MudTh>
@@ -57,6 +57,7 @@
             }
             <MudTd DataLabel="Loan">
                 <MudText Class="@(context.IsActive ? null : "mud-text-disabled")">@context.Name</MudText>
+                <LedgerTag LedgerId="context.LedgerId" />
                 <MudText Typo="Typo.caption" Class="mud-text-secondary">
                     @Display.Of(context.Type)@(context.Lender is null ? "" : $" · {context.Lender.Name}")@(context.IsActive ? "" : " · Inactive")
                     <ExternalLink Url="@context.Lender?.WebsiteUrl" IconOnly="true" Title="@($"Open {context.Lender?.Name} website")" />
@@ -94,10 +95,13 @@
                 }
             </MudTd>
             <MudTd Style="text-align:right; white-space:nowrap">
-                <span @onclick:stopPropagation="true">
-                    <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="() => EditAsync(context)" aria-label="Edit" />
-                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="() => DeleteAsync(context)" aria-label="Delete" />
-                </span>
+                @if (Scope.IsHome(context.LedgerId))
+                {
+                    <span @onclick:stopPropagation="true">
+                        <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="() => EditAsync(context)" aria-label="Edit" />
+                        <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="() => DeleteAsync(context)" aria-label="Delete" />
+                    </span>
+                }
             </MudTd>
         </RowTemplate>
         <NoRecordsContent>
@@ -109,14 +113,18 @@
 @code {
     private bool _loading = true;
     private List<Loan> _loans = [];
+
+    [CascadingParameter] private LedgerScope Scope { get; set; } = LedgerScope.None;
+
+    private string RowStyle(Loan loan, int _) => $"cursor:pointer; {Scope.RowStyle(loan.LedgerId)}";
     private Dictionary<int, List<ExtraPayment>> _loanExtras = [];
 
     protected override Task OnInitializedAsync() => LoadAsync();
 
     private async Task LoadAsync()
     {
-        _loans = await Ledger.GetLoansAsync();
-        var bills = await Ledger.GetBillsAsync();
+        _loans = (await Ledger.GetLoansAsync(includeShared: true)).OrderBy(l => !Scope.IsHome(l.LedgerId)).ToList();
+        var bills = await Ledger.GetBillsAsync(includeShared: true);
         _loanExtras = _loans.ToDictionary(l => l.Id, l => LoanPayments.ExtrasFor(l, bills, Ledger.Today));
         _loading = false;
     }

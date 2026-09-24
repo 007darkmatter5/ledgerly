@@ -24,7 +24,7 @@
             <MudSelectItem T="int?" Value="null">All accounts</MudSelectItem>
             @foreach (var account in _accounts)
             {
-                <MudSelectItem T="int?" Value="account.Id">@account.Name</MudSelectItem>
+                <MudSelectItem T="int?" Value="account.Id">@account.Name <LedgerTag LedgerId="account.LedgerId" /></MudSelectItem>
             }
             <MudSelectItem T="int?" Value="0">Not assigned</MudSelectItem>
         </MudSelect>
@@ -108,7 +108,7 @@
     <MudItem xs="12" lg="9">
         <MudPaper Elevation="1">
             <MudText Typo="Typo.h6" Class="px-4 pt-3">Payment history</MudText>
-            <MudTable T="HistoryRow" Items="_rows" GroupBy="_byMonth" Dense="true" Hover="true" Elevation="0" Breakpoint="Breakpoint.Sm"
+            <MudTable T="HistoryRow" Items="_rows" GroupBy="_byMonth" Dense="true" Hover="true" Elevation="0" Breakpoint="Breakpoint.Sm" RowStyleFunc="RowStyle"
                       GroupHeaderClass="mud-background-gray">
                 <HeaderContent>
                     <MudTh>Paid on</MudTh>
@@ -149,7 +149,7 @@
             @{
                 var total = _rows.Sum(r => r.Amount);
             }
-            @foreach (var group in _rows.GroupBy(r => r.Category?.Id).Select(g => (Category: g.First().Category, Total: g.Sum(r => r.Amount), Count: g.Count())).OrderByDescending(g => g.Total))
+            @foreach (var group in _rows.GroupBy(r => r.Category?.Name.ToUpperInvariant()).Select(g => (Category: CategoryOf(g), Total: g.Sum(r => r.Amount), Count: g.Count())).OrderByDescending(g => g.Total))
             {
                 <div class="mb-3">
                     <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
@@ -182,6 +182,7 @@
                 <MudText Typo="Typo.body2">@transaction.Description</MudText>
                 <CategoryChip Category="transaction.Category" />
                 <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">Transaction</MudChip>
+                <LedgerTag LedgerId="transaction.LedgerId" />
             </MudStack>
             <MudText Typo="Typo.caption" Class="mud-text-secondary">@transaction.Payee?.Name</MudText>
             @if (!string.IsNullOrWhiteSpace(transaction.Notes))
@@ -192,9 +193,12 @@
         <MudTd DataLabel="Paid from">@transaction.Account?.Name</MudTd>
         <MudTd DataLabel="Amount" Style="text-align:right; white-space:nowrap">@transaction.Amount.ToString("C")</MudTd>
         <MudTd Style="text-align:right; white-space:nowrap">
-            <MudTooltip Text="Edit or delete the transaction">
-                <MudIconButton Icon="@Icons.Material.Filled.EditNote" Size="Size.Small" OnClick="() => EditTransactionAsync(transaction)" aria-label="@($"Edit {transaction.Description}")" />
-            </MudTooltip>
+            @if (Scope.IsHome(transaction.LedgerId))
+            {
+                <MudTooltip Text="Edit or delete the transaction">
+                    <MudIconButton Icon="@Icons.Material.Filled.EditNote" Size="Size.Small" OnClick="() => EditTransactionAsync(transaction)" aria-label="@($"Edit {transaction.Description}")" />
+                </MudTooltip>
+            }
         </MudTd>
     </text>;
 }
@@ -211,6 +215,7 @@
                         <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center" Wrap="Wrap.Wrap">
                             <MudText Typo="Typo.body2">@context.Bill.Name</MudText>
                             <CategoryChip Category="context.Bill.Category" />
+                            <LedgerTag LedgerId="context.Bill.LedgerId" />
                             @if (context.IsAssumed)
                             {
                                 <MudTooltip Text="Autopay, not marked paid. Mark it paid to record the actual amount.">
@@ -236,9 +241,12 @@
                         }
                     </MudTd>
                     <MudTd Style="text-align:right; white-space:nowrap">
-                        <MudTooltip Text="@(context.IsAssumed ? "Mark paid" : "Change amount, date or notes, or mark unpaid")">
-                            <MudIconButton Icon="@Icons.Material.Filled.EditNote" Size="Size.Small" OnClick="() => OpenAsync(context.Due, markPaid: context.IsAssumed)" aria-label="@($"Edit payment for {context.Bill.Name}")" />
-                        </MudTooltip>
+                        @if (Scope.IsHome(context.Bill.LedgerId))
+                        {
+                            <MudTooltip Text="@(context.IsAssumed ? "Mark paid" : "Change amount, date or notes, or mark unpaid")">
+                                <MudIconButton Icon="@Icons.Material.Filled.EditNote" Size="Size.Small" OnClick="() => OpenAsync(context.Due, markPaid: context.IsAssumed)" aria-label="@($"Edit payment for {context.Bill.Name}")" />
+                            </MudTooltip>
+                        }
                     </MudTd>
     </text>;
 }
@@ -249,6 +257,14 @@
     private bool _loading = true;
     private bool _saving;
     private List<Bill> _bills = [];
+    [CascadingParameter] private LedgerScope Scope { get; set; } = LedgerScope.None;
+
+    private string RowStyle(HistoryRow row, int _) => Scope.RowStyle(row.Payment?.Bill.LedgerId ?? row.Transaction!.LedgerId);
+
+    /// <summary>Categories are grouped by name across ledgers; show the user's own one when there is one.</summary>
+    private Category? CategoryOf(IEnumerable<HistoryRow> rows) =>
+        rows.Select(r => r.Category).OrderBy(c => c is not null && !Scope.IsHome(c.LedgerId)).First();
+
     private List<Account> _accounts = [];
     private List<Category> _categories = [];
     private List<Payee> _payees = [];
@@ -314,16 +330,16 @@
 
     protected override async Task OnInitializedAsync()
     {
-        _accounts = await Ledger.GetAccountsAsync();
-        _categories = await Ledger.GetCategoriesAsync();
-        _payees = await Ledger.GetPayeesAsync();
+        _accounts = await Ledger.GetAccountsAsync(includeShared: true);
+        _categories = NameFilter.Choices(await Ledger.GetCategoriesAsync(includeShared: true), Scope.HomeLedgerId);
+        _payees = NameFilter.Choices(await Ledger.GetPayeesAsync(includeShared: true), Scope.HomeLedgerId);
         await LoadAsync();
     }
 
     private async Task LoadAsync()
     {
-        _bills = await Ledger.GetBillsAsync();
-        _transactions = await Ledger.GetTransactionsAsync();
+        _bills = await Ledger.GetBillsAsync(includeShared: true);
+        _transactions = await Ledger.GetTransactionsAsync(includeShared: true);
         Recalculate();
         _loading = false;
     }
@@ -332,19 +348,21 @@
     {
         var bills = _bills.Where(b =>
             (_accountFilter is null || (b.PayFromAccountId ?? 0) == _accountFilter)
-            && (_categoryFilter is null || (b.CategoryId ?? 0) == _categoryFilter)
-            && (_payeeFilter is null || (b.PayeeId ?? 0) == _payeeFilter)).ToList();
+            && NameFilter.Matches(b.Category, _categoryFilter, _categories)
+            && NameFilter.Matches(b.Payee, _payeeFilter, _payees)).ToList();
 
         _history = PaymentHistory.Between(bills, From, To, Today, _includeAutopay);
-        _notMarked = PaymentHistory.NotMarkedPaid(bills, From, To, Today);
-        _comingUp = PaymentHistory.ComingUp(bills, From, To, Today);
+        // Marking paid is for the user's own bills; shared ones show in the history only.
+        var mine = bills.Where(b => Scope.IsHome(b.LedgerId)).ToList();
+        _notMarked = PaymentHistory.NotMarkedPaid(mine, From, To, Today);
+        _comingUp = PaymentHistory.ComingUp(mine, From, To, Today);
 
         // Money spent so far; planned transactions aren't paid yet.
         _spent = !_includeTransactions ? [] : _transactions.Where(t =>
             t.IsSpent && t.Date >= From && t.Date <= To && t.Date <= Today
             && (_accountFilter is null || t.AccountId == _accountFilter)
-            && (_categoryFilter is null || (t.CategoryId ?? 0) == _categoryFilter)
-            && (_payeeFilter is null || (t.PayeeId ?? 0) == _payeeFilter)).ToList();
+            && NameFilter.Matches(t.Category, _categoryFilter, _categories)
+            && NameFilter.Matches(t.Payee, _payeeFilter, _payees)).ToList();
         _rows = _history.Select(p => new HistoryRow(p.PaidOn, p.Amount, p.Bill.Category, Payment: p))
             .Concat(_spent.Select(t => new HistoryRow(t.Date, t.Amount, t.Category, Transaction: t)))
             .OrderByDescending(r => r.PaidOn)

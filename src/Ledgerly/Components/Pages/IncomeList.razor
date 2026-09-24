@@ -15,7 +15,7 @@
 </MudStack>
 
 <MudPaper Elevation="1">
-    <MudTable Items="_incomes" Hover="true" Loading="_loading" Breakpoint="Breakpoint.Sm" Elevation="0">
+    <MudTable Items="_incomes" Hover="true" Loading="_loading" Breakpoint="Breakpoint.Sm" Elevation="0" RowStyleFunc="RowStyle">
         <HeaderContent>
             <MudTh>Income</MudTh>
             <MudTh Style="text-align:right">Amount</MudTh>
@@ -28,6 +28,7 @@
         <RowTemplate>
             <MudTd DataLabel="Income">
                 <MudText Class="@(context.IsActive ? null : "mud-text-disabled")">@context.Name</MudText>
+                <LedgerTag LedgerId="context.LedgerId" />
                 @if (!context.IsActive)
                 {
                     <MudText Typo="Typo.caption">Inactive</MudText>
@@ -49,12 +50,15 @@
             <MudTd DataLabel="Deposited to">@context.DepositToAccount?.Name</MudTd>
             <MudTd DataLabel="Per month" Style="text-align:right">@Recurrence.MonthlyEquivalent(context.Frequency, context.Amount).ToString("C")</MudTd>
             <MudTd Style="text-align:right; white-space:nowrap">
-                <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="() => EditAsync(context)" aria-label="Edit" />
-                <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="() => DeleteAsync(context)" aria-label="Delete" />
+                @if (Scope.IsHome(context.LedgerId))
+                {
+                    <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="() => EditAsync(context)" aria-label="Edit" />
+                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="() => DeleteAsync(context)" aria-label="Delete" />
+                }
             </MudTd>
         </RowTemplate>
         <FooterContent>
-            <MudTd colspan="5" Style="text-align:right"><strong>Total per month (active)</strong></MudTd>
+            <MudTd colspan="5" Style="text-align:right"><strong>Total per month (active@(Scope.HasVisibleShared ? ", including shared" : ""))</strong></MudTd>
             <MudTd Style="text-align:right"><strong>@_incomes.Where(i => i.IsActive).Sum(i => Recurrence.MonthlyEquivalent(i.Frequency, i.Amount)).ToString("C")</strong></MudTd>
             <MudTd />
         </FooterContent>
@@ -68,11 +72,15 @@
     private bool _loading = true;
     private List<Income> _incomes = [];
 
+    [CascadingParameter] private LedgerScope Scope { get; set; } = LedgerScope.None;
+
+    private string RowStyle(Income income, int _) => Scope.RowStyle(income.LedgerId);
+
     protected override Task OnInitializedAsync() => LoadAsync();
 
     private async Task LoadAsync()
     {
-        _incomes = await Ledger.GetIncomesAsync();
+        _incomes = await Ledger.GetIncomesAsync(includeShared: true);
         _loading = false;
     }
 

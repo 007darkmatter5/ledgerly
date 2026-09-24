@@ -25,7 +25,7 @@
             </div>
             @foreach (var income in incomes)
             {
-                <div class="cal-item income" title="@($"{income.Name}: +{income.Amount:C}")">
+                <div class="@IncomeClass(income)" style="@IncomeStyle(income)" title="@($"{income.Name}: +{income.Amount:C}")">
                     <span class="cal-name">@income.Name</span><span class="cal-amount">+@income.Amount.ToString("C0")</span>
                 </div>
             }
@@ -66,7 +66,7 @@
             </div>
             @foreach (var income in incomes)
             {
-                <div class="cal-item income"><span class="cal-name">@income.Name</span><span class="cal-amount">+@income.Amount.ToString("C")</span></div>
+                <div class="@IncomeClass(income)" style="@IncomeStyle(income)"><span class="cal-name">@income.Name</span><span class="cal-amount">+@income.Amount.ToString("C")</span></div>
             }
             @foreach (var move in moves)
             {
@@ -128,6 +128,8 @@
 
     [Parameter] public EventCallback OnChanged { get; set; }
 
+    [CascadingParameter] public LedgerScope? Scope { get; set; }
+
     private DateOnly _gridStart;
     private DateOnly _gridEnd;
     private ILookup<DateOnly, BillDue> _dues = Enumerable.Empty<BillDue>().ToLookup(d => d.DueDate);
@@ -172,14 +174,24 @@
     private static string Describe(Transaction transaction) =>
         $"{transaction.Description}: {(transaction.IsSpent ? "" : "+")}{transaction.Amount:C} {(transaction.IsSpent ? "from" : "into")} {transaction.Account?.Name}";
 
-    private RenderFragment TransactionButton(Transaction transaction, string format = "C0") => @<button type="button" class="@($"cal-item transaction{(transaction.IsSpent ? "" : " received")}")" title="@Describe(transaction)" aria-label="@Describe(transaction)" @onclick="() => OpenAsync(transaction)">
-        @if (transaction.Category?.Color is { } color)
-        {
-            <span class="category-dot" style="@($"background:{color}")"></span>
-        }
-        <span class="cal-name">@transaction.Description</span>
-        <span class="cal-amount">@(transaction.IsSpent ? "" : "+")@transaction.Amount.ToString(format)</span>
-    </button>;
+    /// <summary>
+    /// A calendar entry: a button that opens it, or for a shared ledger's entry, a plain box in that ledger's color,
+    /// since it's view only.
+    /// </summary>
+    private RenderFragment CalItem(int ledgerId, string cssClass, string description, Func<Task> open, RenderFragment content) =>
+        Scope?.SharedFor(ledgerId) is { } shared
+            ? @<div class="@($"{cssClass} shared")" style="@($"--ledger-color:{shared.Color}")" title="@($"{description} · {shared.Name}, view only")" aria-label="@($"{description} · {shared.Name}, view only")">@content</div>
+            : @<button type="button" class="@cssClass" title="@description" aria-label="@description" @onclick="open">@content</button>;
+
+    private RenderFragment TransactionButton(Transaction transaction, string format = "C0") =>
+        CalItem(transaction.LedgerId, $"cal-item transaction{(transaction.IsSpent ? "" : " received")}", Describe(transaction), () => OpenAsync(transaction), @<text>
+            @if (transaction.Category?.Color is { } color)
+            {
+                <span class="category-dot" style="@($"background:{color}")"></span>
+            }
+            <span class="cal-name">@transaction.Description</span>
+            <span class="cal-amount">@(transaction.IsSpent ? "" : "+")@transaction.Amount.ToString(format)</span>
+        </text>);
 
     private async Task OpenAsync(Transaction transaction)
     {
@@ -202,18 +214,19 @@
             _ => "unpaid"
         } + (due.Bill.PayFromAccount is { } account ? $" from {account.Name}" : "");
 
-    private RenderFragment DueButton(BillDue due, string format = "C0") => @<button type="button" class="@($"cal-item {Status(due)}")" title="@Describe(due)" aria-label="@Describe(due)" @onclick="() => OpenAsync(due)">
-        @if (due.IsPaid)
-        {
-            <MudIcon Icon="@Icons.Material.Filled.Check" Style="font-size:0.9rem" />
-        }
-        else if (due.Bill.Category?.Color is { } color)
-        {
-            <span class="category-dot" style="@($"background:{color}")"></span>
-        }
-        <span class="cal-name">@due.Bill.Name</span>
-        <span class="cal-amount">@(due.IsEstimate ? "≈" : "")@due.Amount.ToString(format)</span>
-    </button>;
+    private RenderFragment DueButton(BillDue due, string format = "C0") =>
+        CalItem(due.Bill.LedgerId, $"cal-item {Status(due)}", Describe(due), () => OpenAsync(due), @<text>
+            @if (due.IsPaid)
+            {
+                <MudIcon Icon="@Icons.Material.Filled.Check" Style="font-size:0.9rem" />
+            }
+            else if (due.Bill.Category?.Color is { } color)
+            {
+                <span class="category-dot" style="@($"background:{color}")"></span>
+            }
+            <span class="cal-name">@due.Bill.Name</span>
+            <span class="cal-amount">@(due.IsEstimate ? "≈" : "")@due.Amount.ToString(format)</span>
+        </text>);
 
     private static string Status(TransferDue move, DateOnly today) =>
         move.IsDone ? "done" : move.IsMissed(today) ? "missed" : "";
@@ -226,11 +239,17 @@
             _ => move.Transfer.IsAutomatic ? "automatic" : "scheduled"
         };
 
-    private RenderFragment TransferButton(TransferDue move, string format = "C0") => @<button type="button" class="@($"cal-item transfer {Status(move, Ledger.Today)}")" title="@Describe(move, Ledger.Today)" aria-label="@Describe(move, Ledger.Today)" @onclick="() => OpenAsync(move)">
-        <MudIcon Icon="@(move.IsDone ? Icons.Material.Filled.Check : Icons.Material.Filled.SwapHoriz)" Style="font-size:0.9rem" />
-        <span class="cal-name">@move.Transfer.Name</span>
-        <span class="cal-amount">@move.Amount.ToString(format)</span>
-    </button>;
+    private RenderFragment TransferButton(TransferDue move, string format = "C0") =>
+        CalItem(move.Transfer.LedgerId, $"cal-item transfer {Status(move, Ledger.Today)}", Describe(move, Ledger.Today), () => OpenAsync(move), @<text>
+            <MudIcon Icon="@(move.IsDone ? Icons.Material.Filled.Check : Icons.Material.Filled.SwapHoriz)" Style="font-size:0.9rem" />
+            <span class="cal-name">@move.Transfer.Name</span>
+            <span class="cal-amount">@move.Amount.ToString(format)</span>
+        </text>);
+
+    /// <summary>Income isn't clickable; a shared ledger's income gets that ledger's color.</summary>
+    private string IncomeClass(Income income) => "cal-item income" + (Scope?.SharedFor(income.LedgerId) is null ? "" : " shared");
+
+    private string? IncomeStyle(Income income) => Scope?.SharedFor(income.LedgerId) is { } shared ? $"--ledger-color:{shared.Color}" : null;
 
     private async Task OpenAsync(TransferDue move)
     {

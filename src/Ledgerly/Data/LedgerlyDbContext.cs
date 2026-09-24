@@ -6,6 +6,7 @@ namespace Ledgerly.Data;
 public class LedgerlyDbContext(DbContextOptions<LedgerlyDbContext> options) : IdentityDbContext<ApplicationUser>(options)
 {
     public DbSet<Ledger> Ledgers => Set<Ledger>();
+    public DbSet<LedgerMember> LedgerMembers => Set<LedgerMember>();
     public DbSet<Category> Categories => Set<Category>();
     public DbSet<Payee> Payees => Set<Payee>();
     public DbSet<Account> Accounts => Set<Account>();
@@ -36,6 +37,19 @@ public class LedgerlyDbContext(DbContextOptions<LedgerlyDbContext> options) : Id
             e.HasOne<ApplicationUser>().WithMany().HasForeignKey(l => l.OwnerId).OnDelete(DeleteBehavior.Cascade);
             // One personal ledger and at most one sample ledger per user.
             e.HasIndex(l => new { l.OwnerId, l.IsSample }).IsUnique();
+        });
+
+        modelBuilder.Entity<ApplicationUser>(e => e.Property(u => u.DisplayName).HasMaxLength(50));
+
+        modelBuilder.Entity<LedgerMember>(e =>
+        {
+            e.Property(m => m.Role).HasConversion<string>().HasMaxLength(20);
+            e.Property(m => m.Color).HasMaxLength(9);
+            e.Property(m => m.Nickname).HasMaxLength(100);
+            e.HasIndex(m => new { m.LedgerId, m.UserId }).IsUnique();
+            // Deleting the ledger or the person ends the sharing.
+            e.HasOne(m => m.Ledger).WithMany().HasForeignKey(m => m.LedgerId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<ApplicationUser>().WithMany().HasForeignKey(m => m.UserId).OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<Category>(e =>

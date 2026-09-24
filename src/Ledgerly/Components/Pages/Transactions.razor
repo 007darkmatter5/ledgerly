@@ -27,7 +27,7 @@
             <MudSelectItem T="int?" Value="null">All accounts</MudSelectItem>
             @foreach (var account in _accounts)
             {
-                <MudSelectItem T="int?" Value="account.Id">@account.Name</MudSelectItem>
+                <MudSelectItem T="int?" Value="account.Id">@account.Name <LedgerTag LedgerId="account.LedgerId" /></MudSelectItem>
             }
         </MudSelect>
         <MudSelect T="int?" @bind-Value="_categoryFilter" Label="Category" Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:190px"
@@ -81,7 +81,7 @@
     <MudItem xs="12" lg="9">
         <MudPaper Elevation="1">
             <MudTable T="Transaction" Items="shown" GroupBy="_byMonth" Dense="true" Hover="true" Elevation="0" Breakpoint="Breakpoint.Sm"
-                      GroupHeaderClass="mud-background-gray" OnRowClick="@(e => EditAsync(e.Item))" RowStyle="cursor:pointer">
+                      GroupHeaderClass="mud-background-gray" OnRowClick="@(e => EditAsync(e.Item))" RowStyleFunc="RowStyle">
                 <HeaderContent>
                     <MudTh>Date</MudTh>
                     <MudTh>Description</MudTh>
@@ -104,6 +104,7 @@
                         <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center" Wrap="Wrap.Wrap">
                             <MudText Typo="Typo.body2">@context.Description</MudText>
                             <CategoryChip Category="context.Category" />
+                            <LedgerTag LedgerId="context.LedgerId" />
                         </MudStack>
                         @if (context.Payee is not null || !string.IsNullOrWhiteSpace(context.Notes))
                         {
@@ -134,7 +135,7 @@
             @{
                 var total = spent.Sum(t => t.Amount);
             }
-            @foreach (var group in spent.GroupBy(t => t.Category?.Id).Select(g => (Category: g.First().Category, Total: g.Sum(t => t.Amount), Count: g.Count())).OrderByDescending(g => g.Total))
+            @foreach (var group in spent.GroupBy(t => t.Category?.Name.ToUpperInvariant()).Select(g => (Category: g.Select(t => t.Category).OrderBy(c => c is not null && !Scope.IsHome(c.LedgerId)).First(), Total: g.Sum(t => t.Amount), Count: g.Count())).OrderByDescending(g => g.Total))
             {
                 <div class="mb-3">
                     <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
@@ -160,6 +161,12 @@
     private enum Period { ThisMonth, LastMonth, Last3Months, ThisYear, LastYear, All }
 
     [SupplyParameterFromQuery(Name = "account")] private int? AccountFilter { get; set; }
+
+    [CascadingParameter] private LedgerScope Scope { get; set; } = LedgerScope.None;
+
+    /// <summary>The user's own transactions open for editing; shared ones get their ledger's color instead.</summary>
+    private string RowStyle(Transaction transaction, int _) =>
+        Scope.IsHome(transaction.LedgerId) ? "cursor:pointer" : Scope.RowStyle(transaction.LedgerId);
 
     private bool _loading = true;
     private List<Transaction> _transactions = [];
@@ -199,7 +206,7 @@
     private IEnumerable<Transaction> Filtered => _transactions.Where(t =>
         (From is null || t.Date >= From) && (To is null || t.Date <= To)
         && (AccountFilter is null || t.AccountId == AccountFilter)
-        && (_categoryFilter is null || (t.CategoryId ?? 0) == _categoryFilter)
+        && NameFilter.Matches(t.Category, _categoryFilter, _categories)
         && (string.IsNullOrWhiteSpace(_search)
             || t.Description.Contains(_search.Trim(), StringComparison.CurrentCultureIgnoreCase)
             || t.Payee?.Name.Contains(_search.Trim(), StringComparison.CurrentCultureIgnoreCase) == true
@@ -219,19 +226,21 @@
 
     protected override async Task OnInitializedAsync()
     {
-        _accounts = await Ledger.GetAccountsAsync();
-        _categories = await Ledger.GetCategoriesAsync();
+        _accounts = await Ledger.GetAccountsAsync(includeShared: true);
+        _categories = NameFilter.Choices(await Ledger.GetCategoriesAsync(includeShared: true), Scope.HomeLedgerId);
         await LoadAsync();
     }
 
     private async Task LoadAsync()
     {
-        _transactions = await Ledger.GetTransactionsAsync();
+        _transactions = await Ledger.GetTransactionsAsync(includeShared: true);
         _loading = false;
     }
 
     private async Task EditAsync(Transaction? transaction)
     {
+        if (transaction is not null && !Scope.IsHome(transaction.LedgerId))
+            return; // shared with the user, view only
         if (await TransactionDialog.ShowAsync(Dialogs, transaction))
         {
             if (transaction is null)

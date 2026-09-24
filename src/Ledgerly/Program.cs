@@ -34,6 +34,7 @@ builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddScoped<ICurrentUser, AuthenticationStateCurrentUser>();
 builder.Services.AddScoped<LedgerService>();
 builder.Services.AddSingleton<DataGeneration>();
+builder.Services.AddSingleton<SharingNotifier>();
 builder.Services.AddScoped<BackupService>();
 
 // Authentication

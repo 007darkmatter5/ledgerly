@@ -155,6 +155,60 @@ try {
   const afterBackupGone = await page.locator('.mud-table-body >> text=E2E After Backup').count() === 0;
   note(`data matches the backup after restore: ${afterBackupGone}`);
   if (!afterBackupGone) { note('FAIL: the category added after the backup is still there'); failed = true; }
+
+  // Sharing: a second user signs up; the first shares their ledger. The invitation pops up live in the second
+  // user's open tab; once accepted, the first user's transaction shows for them tagged and read-only, and switching
+  // the ledger off in the Ledgers menu hides it again.
+  const other = await browser.newPage();
+  other.on('pageerror', (e) => note(`other pageerror: ${e.message}`));
+  await other.goto(`${base}/Account/Register`);
+  await other.fill('[id="Input.Email"]', 'e2e-partner@example.com');
+  await other.fill('[id="Input.Password"]', 'E2e!Password1');
+  await other.fill('[id="Input.ConfirmPassword"]', 'E2e!Password1');
+  await other.click('button[type=submit]');
+  await other.waitForSelector('text=Getting started', { timeout: 30000 });
+  await other.waitForTimeout(3000);
+
+  await page.goto(`${base}/sharing`);
+  const email = page.getByLabel('Their email address');
+  await email.waitFor({ timeout: 10000 });
+  await page.waitForTimeout(2000);
+  await email.fill('e2e-partner@example.com');
+  await page.getByRole('button', { name: 'Share', exact: true }).click();
+  const invited = await page.waitForSelector('text=waiting for them to accept', { timeout: 10000 }).then(() => true, () => false);
+  note(`ledger shared (invitation sent): ${invited}`);
+  if (!invited) { note('FAIL: the invitation was not listed'); failed = true; }
+
+  const livePrompt = await other.waitForSelector('text=shared a ledger with you', { timeout: 15000 }).then(() => true, () => false);
+  note(`invitation popped up live for the other user: ${livePrompt}`);
+  if (!livePrompt) {
+    note('FAIL: the invitation did not appear without a reload');
+    failed = true;
+    await other.reload();
+    await other.waitForSelector('text=shared a ledger with you', { timeout: 15000 });
+  }
+  await other.getByRole('button', { name: 'Accept', exact: true }).click();
+  await other.waitForTimeout(2000);
+
+  await other.goto(`${base}/transactions`);
+  const sharedRow = await other.waitForSelector('.mud-table-body tr:has-text("E2E Dinner out")', { timeout: 10000 }).then((h) => h, () => null);
+  const sharedText = sharedRow === null ? '' : await sharedRow.innerText();
+  const tagged = sharedText.includes("e2e@example.com's ledger");
+  note(`shared transaction shown with its ledger tag: ${tagged}`);
+  if (!tagged) { note(`FAIL: shared transaction missing or untagged: ${sharedText}`); failed = true; }
+  if (sharedRow !== null) {
+    await sharedRow.click();
+    const opened = await other.waitForSelector('.mud-dialog', { timeout: 2000 }).then(() => true, () => false);
+    note(`shared transaction is read-only (no edit dialog): ${!opened}`);
+    if (opened) { note('FAIL: a shared transaction opened for editing'); failed = true; }
+  }
+
+  await other.click('button[aria-label="Ledgers"]');
+  await other.click(".ledgers-menu >> text=e2e@example.com's ledger");
+  const hidden = await other.waitForSelector('.mud-table-body tr:has-text("E2E Dinner out")', { state: 'detached', timeout: 10000 }).then(() => true, () => false);
+  note(`switching the shared ledger off hides its data: ${hidden}`);
+  if (!hidden) { note('FAIL: the shared transaction is still shown after switching the ledger off'); failed = true; }
+  await other.close();
 } catch (e) {
   note(`FAIL: ${e.message}`);
   failed = true;

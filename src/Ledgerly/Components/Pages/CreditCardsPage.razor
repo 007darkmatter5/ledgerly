@@ -35,6 +35,7 @@
     <MudItem xs="12" sm="4">
         <StatCard Label="Total owed" Icon="@Icons.Material.Filled.CreditCard">
             <Value>@_cards.Where(c => c.Card.IsActive).Sum(c => c.Owed).ToString("C")</Value>
+            <Caption>@(Scope.HasVisibleShared ? "Including shared ledgers" : "")</Caption>
         </StatCard>
     </MudItem>
     <MudItem xs="12" sm="4">
@@ -56,13 +57,14 @@
         var card = summary.Card;
         var utilization = CreditCards.Utilization(card, summary.Owed);
         <MudItem xs="12" sm="6" md="4">
-            <MudCard Elevation="1" Style="height:100%; cursor:pointer" @onclick="@(() => Navigation.NavigateTo($"cards/{card.Id}"))">
+            <MudCard Elevation="1" Style="@CardStyle(card)" @onclick="@(() => Navigation.NavigateTo($"cards/{card.Id}"))">
                 <MudCardHeader>
                     <CardHeaderAvatar>
                         <MudAvatar Color="Color.Primary" Variant="Variant.Outlined"><MudIcon Icon="@Icons.Material.Filled.CreditCard" /></MudAvatar>
                     </CardHeaderAvatar>
                     <CardHeaderContent>
                         <MudText Typo="Typo.subtitle1" Class="@(card.IsActive ? null : "mud-text-disabled")">@card.Name</MudText>
+                        <LedgerTag LedgerId="card.LedgerId" />
                         <MudText Typo="Typo.caption" Class="mud-text-secondary">
                             @(card.AprPercent is { } apr ? $"{apr:0.##}% APR" : "No APR set")@(card.IsActive ? "" : " · Inactive")
                         </MudText>
@@ -99,6 +101,10 @@
     private bool _loading = true;
     private List<CardSummary> _cards = [];
 
+    [CascadingParameter] private LedgerScope Scope { get; set; } = LedgerScope.None;
+
+    private string CardStyle(Account card) => $"height:100%; cursor:pointer; {Scope.RowStyle(card.LedgerId)}";
+
     private IEnumerable<CardSummary> ActiveWithLimits => _cards.Where(c => c.Card.IsActive && c.Card.CreditLimit > 0);
     private decimal TotalLimit => ActiveWithLimits.Sum(c => c.Card.CreditLimit!.Value);
     private decimal OwedOnLimitedCards => ActiveWithLimits.Sum(c => Math.Max(0m, c.Owed));
@@ -108,9 +114,9 @@
     private async Task LoadAsync()
     {
         var today = Ledger.Today;
-        var bills = await Ledger.GetBillsAsync();
-        var transactions = await Ledger.GetTransactionsAsync();
-        _cards = (await Ledger.GetAccountsAsync())
+        var bills = await Ledger.GetBillsAsync(includeShared: true);
+        var transactions = await Ledger.GetTransactionsAsync(includeShared: true);
+        _cards = (await Ledger.GetAccountsAsync(includeShared: true))
             .Where(a => a.IsCreditCard)
             .Select(card =>
             {
@@ -118,7 +124,7 @@
                 var payments = simulation.Entries.Where(e => e.Kind == CardEntryKind.Payment && e.Date >= today).ToList();
                 return new CardSummary(card, simulation.OwedOn(today), payments.FirstOrDefault(), payments.Where(p => p.Date <= today.AddDays(30)).ToList());
             })
-            .OrderBy(c => !c.Card.IsActive).ThenBy(c => c.Card.Name)
+            .OrderBy(c => !Scope.IsHome(c.Card.LedgerId)).ThenBy(c => !c.Card.IsActive).ThenBy(c => c.Card.Name)
             .ToList();
         _loading = false;
     }

@@ -5,10 +5,12 @@ using Microsoft.EntityFrameworkCore;
 namespace Ledgerly.Services;
 
 /// <summary>
-/// Data access for the app, always limited to the signed-in user's active ledger.
+/// Data access for the app. Writes are always limited to the signed-in user's active ledger; reads can also include
+/// ledgers shared with them (see <see cref="LedgerScope"/>).
 /// Each call uses its own short-lived DbContext.
 /// </summary>
-public class LedgerService(IDbContextFactory<LedgerlyDbContext> dbFactory, ICurrentUser currentUser, TimeProvider clock, DataGeneration? dataGeneration = null)
+public class LedgerService(IDbContextFactory<LedgerlyDbContext> dbFactory, ICurrentUser currentUser, TimeProvider clock, DataGeneration? dataGeneration = null,
+    SharingNotifier? notifier = null)
 {
     private const string MyLedgerName = "My ledger";
     private const string SampleLedgerName = "Sample data";
@@ -91,13 +93,17 @@ public class LedgerService(IDbContextFactory<LedgerlyDbContext> dbFactory, ICurr
         await SetActiveLedgerAsync(db, userId, await GetOrCreateLedgerAsync(db, userId, isSample: false));
     }
 
-    /// <summary>Remembers the Running Balance selection on the active ledger. Ids outside the ledger are dropped.</summary>
+    /// <summary>
+    /// Remembers the Running Balance selection on the active ledger. It can include accounts of shared ledgers that are
+    /// switched on; ids the user can't see are dropped.
+    /// </summary>
     public async Task SaveProjectionViewAsync(IEnumerable<int> accountIds, int days, bool worstCase)
     {
         var ledger = await GetActiveLedgerAsync();
         await using var db = await dbFactory.CreateDbContextAsync();
         var requested = accountIds.ToHashSet();
-        var valid = await db.Accounts.Where(a => a.LedgerId == ledger.Id && requested.Contains(a.Id))
+        var ledgerIds = await ReadLedgerIdsAsync(includeShared: true);
+        var valid = await db.Accounts.Where(a => ledgerIds.Contains(a.LedgerId) && requested.Contains(a.Id))
             .Select(a => a.Id).ToListAsync();
         var ids = valid.Count == 0 ? null : string.Join(',', valid.Order());
 
@@ -114,12 +120,16 @@ public class LedgerService(IDbContextFactory<LedgerlyDbContext> dbFactory, ICurr
 
     // Accounts
 
-    public async Task<List<Account>> GetAccountsAsync(bool activeOnly = false)
+    /// <summary>
+    /// The ledger's accounts. With <paramref name="includeShared"/>, also the accounts of shared ledgers that are
+    /// switched on (to display only: pickers for new or edited items must use the user's own).
+    /// </summary>
+    public async Task<List<Account>> GetAccountsAsync(bool activeOnly = false, bool includeShared = false)
     {
-        var ledgerId = await LedgerIdAsync();
+        var ledgerIds = await ReadLedgerIdsAsync(includeShared);
         await using var db = await dbFactory.CreateDbContextAsync();
         var accounts = await db.Accounts.AsNoTracking()
-            .Where(a => a.LedgerId == ledgerId && (!activeOnly || a.IsActive))
+            .Where(a => ledgerIds.Contains(a.LedgerId) && (!activeOnly || a.IsActive))
             .ToListAsync();
         return accounts.OrderBy(a => a.Type).ThenBy(a => a.Name).ToList();
     }
@@ -147,11 +157,11 @@ public class LedgerService(IDbContextFactory<LedgerlyDbContext> dbFactory, ICurr
 
     // Categories
 
-    public async Task<List<Category>> GetCategoriesAsync()
+    public async Task<List<Category>> GetCategoriesAsync(bool includeShared = false)
     {
-        var ledgerId = await LedgerIdAsync();
+        var ledgerIds = await ReadLedgerIdsAsync(includeShared);
         await using var db = await dbFactory.CreateDbContextAsync();
-        var categories = await db.Categories.AsNoTracking().Where(c => c.LedgerId == ledgerId).ToListAsync();
+        var categories = await db.Categories.AsNoTracking().Where(c => ledgerIds.Contains(c.LedgerId)).ToListAsync();
         return categories.OrderBy(c => c.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
     }
 
@@ -183,11 +193,11 @@ public class LedgerService(IDbContextFactory<LedgerlyDbContext> dbFactory, ICurr
 
     // Payees
 
-    public async Task<List<Payee>> GetPayeesAsync()
+    public async Task<List<Payee>> GetPayeesAsync(bool includeShared = false)
     {
-        var ledgerId = await LedgerIdAsync();
+        var ledgerIds = await ReadLedgerIdsAsync(includeShared);
         await using var db = await dbFactory.CreateDbContextAsync();
-        var payees = await db.Payees.AsNoTracking().Where(p => p.LedgerId == ledgerId).ToListAsync();
+        var payees = await db.Payees.AsNoTracking().Where(p => ledgerIds.Contains(p.LedgerId)).ToListAsync();
         return payees.OrderBy(p => p.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
     }
 
@@ -226,12 +236,13 @@ public class LedgerService(IDbContextFactory<LedgerlyDbContext> dbFactory, ICurr
 
     // Bills
 
-    public async Task<List<Bill>> GetBillsAsync()
+    /// <summary>The ledger's bills; with <paramref name="includeShared"/>, also those of shared ledgers that are switched on.</summary>
+    public async Task<List<Bill>> GetBillsAsync(bool includeShared = false)
     {
-        var ledgerId = await LedgerIdAsync();
+        var ledgerIds = await ReadLedgerIdsAsync(includeShared);
         await using var db = await dbFactory.CreateDbContextAsync();
         var bills = await db.Bills.AsNoTracking()
-            .Where(b => b.LedgerId == ledgerId)
+            .Where(b => ledgerIds.Contains(b.LedgerId))
             .Include(b => b.PayFromAccount)
             .Include(b => b.CardAccount)
             .Include(b => b.Loan).ThenInclude(l => l!.Lender)
@@ -244,7 +255,7 @@ public class LedgerService(IDbContextFactory<LedgerlyDbContext> dbFactory, ICurr
         var cardIds = bills.Where(b => b.CardAccountId is not null).Select(b => b.CardAccountId!.Value).Distinct().ToList();
         var cardTransactions = cardIds.Count == 0
             ? []
-            : await db.Transactions.AsNoTracking().Where(t => t.LedgerId == ledgerId && cardIds.Contains(t.AccountId)).ToListAsync();
+            : await db.Transactions.AsNoTracking().Where(t => ledgerIds.Contains(t.LedgerId) && cardIds.Contains(t.AccountId)).ToListAsync();
         CreditCards.EstimatePayments(bills, cardTransactions, Today.AddYears(1));
         return bills.OrderBy(b => b.Name).ToList();
     }
@@ -372,12 +383,12 @@ public class LedgerService(IDbContextFactory<LedgerlyDbContext> dbFactory, ICurr
 
     // Income
 
-    public async Task<List<Income>> GetIncomesAsync()
+    public async Task<List<Income>> GetIncomesAsync(bool includeShared = false)
     {
-        var ledgerId = await LedgerIdAsync();
+        var ledgerIds = await ReadLedgerIdsAsync(includeShared);
         await using var db = await dbFactory.CreateDbContextAsync();
         var incomes = await db.Incomes.AsNoTracking()
-            .Where(i => i.LedgerId == ledgerId)
+            .Where(i => ledgerIds.Contains(i.LedgerId))
             .Include(i => i.DepositToAccount)
             .ToListAsync();
         return incomes.OrderBy(i => i.Name).ToList();
@@ -395,12 +406,12 @@ public class LedgerService(IDbContextFactory<LedgerlyDbContext> dbFactory, ICurr
 
     // Transfers
 
-    public async Task<List<Transfer>> GetTransfersAsync()
+    public async Task<List<Transfer>> GetTransfersAsync(bool includeShared = false)
     {
-        var ledgerId = await LedgerIdAsync();
+        var ledgerIds = await ReadLedgerIdsAsync(includeShared);
         await using var db = await dbFactory.CreateDbContextAsync();
         var transfers = await db.Transfers.AsNoTracking()
-            .Where(t => t.LedgerId == ledgerId)
+            .Where(t => ledgerIds.Contains(t.LedgerId))
             .Include(t => t.FromAccount)
             .Include(t => t.ToAccount)
             .Include(t => t.Occurrences)
@@ -470,12 +481,12 @@ public class LedgerService(IDbContextFactory<LedgerlyDbContext> dbFactory, ICurr
     // Transactions
 
     /// <summary>The ledger's one-off transactions, newest first, optionally limited to dates <paramref name="from"/> through <paramref name="to"/>.</summary>
-    public async Task<List<Transaction>> GetTransactionsAsync(DateOnly? from = null, DateOnly? to = null)
+    public async Task<List<Transaction>> GetTransactionsAsync(DateOnly? from = null, DateOnly? to = null, bool includeShared = false)
     {
-        var ledgerId = await LedgerIdAsync();
+        var ledgerIds = await ReadLedgerIdsAsync(includeShared);
         await using var db = await dbFactory.CreateDbContextAsync();
         var transactions = await db.Transactions.AsNoTracking()
-            .Where(t => t.LedgerId == ledgerId && (from == null || t.Date >= from) && (to == null || t.Date <= to))
+            .Where(t => ledgerIds.Contains(t.LedgerId) && (from == null || t.Date >= from) && (to == null || t.Date <= to))
             .Include(t => t.Account)
             .Include(t => t.Category)
             .Include(t => t.Payee)
@@ -531,19 +542,20 @@ public class LedgerService(IDbContextFactory<LedgerlyDbContext> dbFactory, ICurr
 
     // Loans
 
-    public async Task<List<Loan>> GetLoansAsync()
+    public async Task<List<Loan>> GetLoansAsync(bool includeShared = false)
     {
-        var ledgerId = await LedgerIdAsync();
+        var ledgerIds = await ReadLedgerIdsAsync(includeShared);
         await using var db = await dbFactory.CreateDbContextAsync();
-        var loans = await db.Loans.AsNoTracking().Where(l => l.LedgerId == ledgerId).Include(l => l.Lender).ToListAsync();
+        var loans = await db.Loans.AsNoTracking().Where(l => ledgerIds.Contains(l.LedgerId)).Include(l => l.Lender).ToListAsync();
         return loans.OrderBy(l => l.Name).ToList();
     }
 
+    /// <summary>A loan in the user's own ledger or a shared ledger that's switched on.</summary>
     public async Task<Loan?> GetLoanAsync(int id)
     {
-        var ledgerId = await LedgerIdAsync();
+        var ledgerIds = await ReadLedgerIdsAsync(includeShared: true);
         await using var db = await dbFactory.CreateDbContextAsync();
-        return await db.Loans.AsNoTracking().Include(l => l.Lender).SingleOrDefaultAsync(l => l.Id == id && l.LedgerId == ledgerId);
+        return await db.Loans.AsNoTracking().Include(l => l.Lender).SingleOrDefaultAsync(l => l.Id == id && ledgerIds.Contains(l.LedgerId));
     }
 
     public async Task SaveLoanAsync(Loan loan)
@@ -558,22 +570,202 @@ public class LedgerService(IDbContextFactory<LedgerlyDbContext> dbFactory, ICurr
 
     // Projection
 
-    public async Task<ProjectionResult> ProjectAsync(IEnumerable<int> accountIds, DateOnly through, ProjectionMode mode = ProjectionMode.Expected)
+    public async Task<ProjectionResult> ProjectAsync(IEnumerable<int> accountIds, DateOnly through, ProjectionMode mode = ProjectionMode.Expected, bool includeShared = false)
     {
         var ids = accountIds.ToHashSet();
-        var accounts = (await GetAccountsAsync()).Where(a => ids.Contains(a.Id)).ToList();
-        return Projection.Build(accounts, await GetBillsAsync(), await GetIncomesAsync(), await GetTransfersAsync(), await GetTransactionsAsync(), through, mode);
+        var accounts = (await GetAccountsAsync(includeShared: includeShared)).Where(a => ids.Contains(a.Id)).ToList();
+        return Projection.Build(accounts, await GetBillsAsync(includeShared), await GetIncomesAsync(includeShared), await GetTransfersAsync(includeShared),
+            await GetTransactionsAsync(includeShared: includeShared), through, mode);
     }
 
-    public async Task<bool> HasAnyDataAsync()
+    public async Task<bool> HasAnyDataAsync(bool includeShared = false)
     {
-        var ledgerId = await LedgerIdAsync();
+        var ledgerIds = await ReadLedgerIdsAsync(includeShared);
         await using var db = await dbFactory.CreateDbContextAsync();
-        return await db.Accounts.AnyAsync(a => a.LedgerId == ledgerId)
-            || await db.Bills.AnyAsync(b => b.LedgerId == ledgerId)
-            || await db.Transfers.AnyAsync(t => t.LedgerId == ledgerId)
-            || await db.Transactions.AnyAsync(t => t.LedgerId == ledgerId)
-            || await db.Loans.AnyAsync(l => l.LedgerId == ledgerId);
+        return await db.Accounts.AnyAsync(a => ledgerIds.Contains(a.LedgerId))
+            || await db.Bills.AnyAsync(b => ledgerIds.Contains(b.LedgerId))
+            || await db.Transfers.AnyAsync(t => ledgerIds.Contains(t.LedgerId))
+            || await db.Transactions.AnyAsync(t => ledgerIds.Contains(t.LedgerId))
+            || await db.Loans.AnyAsync(l => ledgerIds.Contains(l.LedgerId));
+    }
+
+    // Sharing
+
+    /// <summary>Colors given to shared ledgers when they're accepted, in order, skipping ones the user already uses.</summary>
+    public static readonly string[] LayerColors = ["#8E44AD", "#D35400", "#16A085", "#C0392B", "#5C6BC0", "#795548", "#E91E63", "#607D8B"];
+
+    /// <summary>
+    /// The home ledger and the shared ledgers the user has accepted, with their layer settings. Read fresh on every
+    /// call, so access that's been removed, or a layer switched off in another tab, applies straight away.
+    /// </summary>
+    public async Task<LedgerScope> GetScopeAsync()
+    {
+        var home = await GetActiveLedgerAsync();
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var rows = await (
+                from m in db.LedgerMembers.AsNoTracking()
+                join l in db.Ledgers on m.LedgerId equals l.Id
+                join u in db.Users on l.OwnerId equals u.Id
+                where m.UserId == home.OwnerId && m.AcceptedAt != null && !l.IsSample
+                select new { m.Id, m.LedgerId, m.Role, m.IsVisible, m.Color, m.Nickname, m.AcceptedAt, u.DisplayName, u.Email })
+            .ToListAsync();
+
+        var shared = rows.OrderBy(r => r.AcceptedAt).Select((r, i) =>
+        {
+            var owner = ApplicationUser.NameOf(r.DisplayName, r.Email);
+            return new SharedLedger(r.Id, r.LedgerId, r.Nickname ?? $"{owner}'s ledger", owner, r.Color ?? LayerColors[i % LayerColors.Length], r.Role, r.IsVisible);
+        }).ToList();
+        return new LedgerScope { HomeLedgerId = home.Id, HomeIsSample = home.IsSample, Shared = shared };
+    }
+
+    /// <summary>
+    /// Shares the user's own ledger (never the sample one) with the account that uses <paramref name="email"/>, as
+    /// an invitation they have to accept. View only for now. Throws <see cref="LedgerValidationException"/> for a
+    /// blank or unknown email, the user's own, or someone it's already shared with.
+    /// </summary>
+    public async Task ShareAsync(string email)
+    {
+        email = email.Trim();
+        if (email.Length == 0)
+            throw new LedgerValidationException("Enter the email address they sign in with.");
+
+        var userId = await RequireUserIdAsync();
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var normalized = email.ToUpperInvariant();
+        var recipient = await db.Users.Where(u => u.NormalizedEmail == normalized).Select(u => u.Id).SingleOrDefaultAsync()
+            ?? throw new LedgerValidationException($"No one on this Ledgerly signs in with {email}.");
+        if (recipient == userId)
+            throw new LedgerValidationException("That's your own email address.");
+
+        var ledger = await GetOrCreateLedgerAsync(db, userId, isSample: false);
+        if (await db.LedgerMembers.AnyAsync(m => m.LedgerId == ledger.Id && m.UserId == recipient))
+            throw new LedgerValidationException($"Your ledger is already shared with {email}.");
+
+        db.LedgerMembers.Add(new LedgerMember { LedgerId = ledger.Id, UserId = recipient, Role = LedgerRole.Viewer, InvitedAt = DateTime.UtcNow });
+        await db.SaveChangesAsync();
+        notifier?.Notify(recipient);
+    }
+
+    /// <summary>Who the user's own ledger is shared with, including invitations not yet answered.</summary>
+    public async Task<List<LedgerShare>> GetSharesAsync()
+    {
+        var userId = await RequireUserIdAsync();
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var rows = await (
+                from m in db.LedgerMembers.AsNoTracking()
+                join l in db.Ledgers on m.LedgerId equals l.Id
+                join u in db.Users on m.UserId equals u.Id
+                where l.OwnerId == userId
+                select new { m.Id, u.DisplayName, u.Email, m.Role, m.AcceptedAt, m.InvitedAt })
+            .ToListAsync();
+        return rows.Select(r => new LedgerShare(r.Id, ApplicationUser.NameOf(r.DisplayName, r.Email), r.Email ?? "", r.Role, r.AcceptedAt is not null, r.InvitedAt))
+            .OrderBy(s => s.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
+    }
+
+    /// <summary>Stops sharing the user's ledger with someone, or withdraws an invitation.</summary>
+    public async Task StopSharingAsync(int memberId)
+    {
+        var userId = await RequireUserIdAsync();
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var member = await db.LedgerMembers.Where(m => m.Id == memberId && m.Ledger!.OwnerId == userId).Select(m => m.UserId).SingleOrDefaultAsync();
+        if (member is null)
+            return;
+        await db.LedgerMembers.Where(m => m.Id == memberId).ExecuteDeleteAsync();
+        notifier?.Notify(member);
+    }
+
+    /// <summary>Invitations waiting for the user to accept or decline, oldest first.</summary>
+    public async Task<List<LedgerInvitation>> GetInvitationsAsync()
+    {
+        var userId = await RequireUserIdAsync();
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var rows = await (
+                from m in db.LedgerMembers.AsNoTracking()
+                join l in db.Ledgers on m.LedgerId equals l.Id
+                join u in db.Users on l.OwnerId equals u.Id
+                where m.UserId == userId && m.AcceptedAt == null
+                select new { m.Id, u.DisplayName, u.Email, m.Role, m.InvitedAt })
+            .ToListAsync();
+        return rows.OrderBy(r => r.InvitedAt)
+            .Select(r => new LedgerInvitation(r.Id, ApplicationUser.NameOf(r.DisplayName, r.Email), r.Email ?? "", r.Role, r.InvitedAt)).ToList();
+    }
+
+    /// <summary>Accepts an invitation (switching the ledger on, in a color not already in use) or declines it.</summary>
+    public async Task RespondToInvitationAsync(int memberId, bool accept)
+    {
+        var userId = await RequireUserIdAsync();
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var member = await db.LedgerMembers.Include(m => m.Ledger)
+            .SingleOrDefaultAsync(m => m.Id == memberId && m.UserId == userId && m.AcceptedAt == null);
+        if (member is null)
+            return;
+
+        if (accept)
+        {
+            var used = await db.LedgerMembers.Where(m => m.UserId == userId && m.Color != null).Select(m => m.Color!).ToListAsync();
+            member.AcceptedAt = DateTime.UtcNow;
+            member.IsVisible = true;
+            member.Color = LayerColors.FirstOrDefault(c => !used.Contains(c)) ?? LayerColors[used.Count % LayerColors.Length];
+        }
+        else
+            db.LedgerMembers.Remove(member);
+
+        await db.SaveChangesAsync();
+        notifier?.Notify(member.Ledger!.OwnerId);
+    }
+
+    /// <summary>Stops seeing a ledger someone shared with the user.</summary>
+    public async Task LeaveSharedLedgerAsync(int memberId)
+    {
+        var userId = await RequireUserIdAsync();
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var owner = await db.LedgerMembers.Where(m => m.Id == memberId && m.UserId == userId).Select(m => m.Ledger!.OwnerId).SingleOrDefaultAsync();
+        if (owner is null)
+            return;
+        await db.LedgerMembers.Where(m => m.Id == memberId).ExecuteDeleteAsync();
+        notifier?.Notify(owner);
+    }
+
+    /// <summary>Switches a shared ledger on or off, or all of them when <paramref name="memberId"/> is null.</summary>
+    public async Task SetSharedVisibleAsync(int? memberId, bool visible)
+    {
+        var userId = await RequireUserIdAsync();
+        await using var db = await dbFactory.CreateDbContextAsync();
+        await db.LedgerMembers.Where(m => m.UserId == userId && m.AcceptedAt != null && (memberId == null || m.Id == memberId))
+            .ExecuteUpdateAsync(s => s.SetProperty(m => m.IsVisible, visible));
+    }
+
+    /// <summary>Renames or recolors a shared ledger for the user. A blank name goes back to "Owner's ledger".</summary>
+    public async Task UpdateSharedLedgerAsync(int memberId, string? nickname, string? color)
+    {
+        nickname = string.IsNullOrWhiteSpace(nickname) ? null : nickname.Trim();
+        if (nickname?.Length > 100)
+            throw new LedgerValidationException("Names can be up to 100 characters.");
+        if (color is not null && !System.Text.RegularExpressions.Regex.IsMatch(color, "^#[0-9A-Fa-f]{6}$"))
+            throw new LedgerValidationException("Choose a color from the list.");
+
+        var userId = await RequireUserIdAsync();
+        await using var db = await dbFactory.CreateDbContextAsync();
+        await db.LedgerMembers.Where(m => m.Id == memberId && m.UserId == userId && m.AcceptedAt != null)
+            .ExecuteUpdateAsync(s => s.SetProperty(m => m.Nickname, nickname).SetProperty(m => m.Color, color));
+    }
+
+    /// <summary>Sets the name other people see when this user shares a ledger with them.</summary>
+    public async Task SetDisplayNameAsync(string? displayName)
+    {
+        displayName = string.IsNullOrWhiteSpace(displayName) ? null : displayName.Trim();
+        if (displayName?.Length > 50)
+            throw new LedgerValidationException("Names can be up to 50 characters.");
+        var userId = await RequireUserIdAsync();
+        await using var db = await dbFactory.CreateDbContextAsync();
+        await db.Users.Where(u => u.Id == userId).ExecuteUpdateAsync(s => s.SetProperty(u => u.DisplayName, displayName));
+    }
+
+    public async Task<string?> GetDisplayNameAsync()
+    {
+        var userId = await RequireUserIdAsync();
+        await using var db = await dbFactory.CreateDbContextAsync();
+        return await db.Users.Where(u => u.Id == userId).Select(u => u.DisplayName).SingleOrDefaultAsync();
     }
 
     // Helpers
@@ -582,6 +774,13 @@ public class LedgerService(IDbContextFactory<LedgerlyDbContext> dbFactory, ICurr
         await currentUser.GetUserIdAsync() ?? throw new UnauthorizedAccessException("Sign in to use Ledgerly.");
 
     private async Task<int> LedgerIdAsync() => (await GetActiveLedgerAsync()).Id;
+
+    /// <summary>
+    /// Ledgers to read from: the home ledger, plus shared ledgers that are switched on when asked for. Writes never
+    /// use this; they're always limited to the home ledger.
+    /// </summary>
+    private async Task<List<int>> ReadLedgerIdsAsync(bool includeShared) =>
+        includeShared ? [.. (await GetScopeAsync()).VisibleLedgerIds] : [await LedgerIdAsync()];
 
     private static async Task<Ledger> GetOrCreateLedgerAsync(LedgerlyDbContext db, string userId, bool isSample)
     {

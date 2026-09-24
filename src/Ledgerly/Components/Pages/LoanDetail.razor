@@ -22,7 +22,10 @@
 
 <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-4" Wrap="Wrap.Wrap">
     <MudStack Spacing="0">
-        <MudText Typo="Typo.h4">@_loan.Name</MudText>
+        <MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center">
+            <MudText Typo="Typo.h4">@_loan.Name</MudText>
+            <LedgerTag LedgerId="_loan.LedgerId" />
+        </MudStack>
         <MudText Typo="Typo.body2" Class="mud-text-secondary">
             @Display.Of(_loan.Type)
             @if (_loan.Lender is { } lender)
@@ -47,8 +50,11 @@
         {
             <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.OpenInNew" Href="@lenderSite" Target="_blank" Rel="noopener noreferrer">Open lender site</MudButton>
         }
-        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.AddCard" OnClick="RecordExtraPaymentAsync">Record extra payment</MudButton>
-        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Edit" OnClick="EditAsync">Edit loan</MudButton>
+        @if (IsMine)
+        {
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.AddCard" OnClick="RecordExtraPaymentAsync">Record extra payment</MudButton>
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Edit" OnClick="EditAsync">Edit loan</MudButton>
+        }
     </MudStack>
 </MudStack>
 
@@ -116,16 +122,22 @@
                             <MudText Typo="Typo.caption" Color="Color.Warning">Differs from the loan payment of @MonthlyAmount.ToString("C"); may include escrow or fees.</MudText>
                         }
                     </MudStack>
-                    <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="() => EditBillAsync(bill)" aria-label="Edit bill" />
+                    @if (IsMine)
+                    {
+                        <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="() => EditBillAsync(bill)" aria-label="Edit bill" />
+                    }
                 </MudStack>
             }
-            <MudStack Row="true" Spacing="2" Wrap="Wrap.Wrap" Class="mt-2">
-                @if (!_bills.Any(b => b.LoanPaymentKind == LoanPaymentKind.MonthlyPayment && b.IsActive))
-                {
-                    <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.Add" OnClick="() => CreateBillAsync(LoanPaymentKind.MonthlyPayment)">Monthly payment bill</MudButton>
-                }
-                <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.Add" OnClick="() => CreateBillAsync(LoanPaymentKind.ExtraPrincipal)">Scheduled extra payment</MudButton>
-            </MudStack>
+            @if (IsMine)
+            {
+                <MudStack Row="true" Spacing="2" Wrap="Wrap.Wrap" Class="mt-2">
+                    @if (!_bills.Any(b => b.LoanPaymentKind == LoanPaymentKind.MonthlyPayment && b.IsActive))
+                    {
+                        <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.Add" OnClick="() => CreateBillAsync(LoanPaymentKind.MonthlyPayment)">Monthly payment bill</MudButton>
+                    }
+                    <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.Add" OnClick="() => CreateBillAsync(LoanPaymentKind.ExtraPrincipal)">Scheduled extra payment</MudButton>
+                </MudStack>
+            }
         </MudPaper>
     </MudItem>
 
@@ -196,7 +208,10 @@
         @if (_whatIfExtra != _loan.ExtraPrincipal)
         {
             <MudButton Size="Size.Small" OnClick="() => OnWhatIfChanged(_loan.ExtraPrincipal)">Reset</MudButton>
-            <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Secondary" OnClick="SaveExtraAsync">Save as my extra payment</MudButton>
+            @if (IsMine)
+            {
+                <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Secondary" OnClick="SaveExtraAsync">Save as my extra payment</MudButton>
+            }
         }
     </MudStack>
 </MudPaper>
@@ -237,6 +252,11 @@ else
 
     private decimal MonthlyAmount => LoanMath.Payment(_loan!) + _loan!.ExtraPrincipal;
 
+    [CascadingParameter] private LedgerScope Scope { get; set; } = LedgerScope.None;
+
+    /// <summary>A loan in a ledger shared with the user is view only.</summary>
+    private bool IsMine => _loan is not null && Scope.IsHome(_loan.LedgerId);
+
     protected override async Task OnParametersSetAsync() => await LoadAsync();
 
     private async Task LoadAsync()
@@ -244,7 +264,7 @@ else
         _loan = await Ledger.GetLoanAsync(Id);
         if (_loan is not null)
         {
-            _bills = (await Ledger.GetBillsAsync()).Where(b => b.LoanId == Id).ToList();
+            _bills = (await Ledger.GetBillsAsync(includeShared: true)).Where(b => b.LoanId == Id).ToList();
             var today = Ledger.Today;
             var payments = LoanPayments.For(_loan, _bills, today);
 

@@ -73,6 +73,51 @@ public class Ledger
     public bool ProjectionWorstCase { get; set; }
 }
 
+/// <summary>What someone a ledger is shared with may do in it. The owner (<see cref="Ledger.OwnerId"/>) can do everything.</summary>
+public enum LedgerRole
+{
+    /// <summary>See everything, change nothing.</summary>
+    Viewer,
+
+    /// <summary>Also mark bills paid, record amounts, and add or edit transactions.</summary>
+    Contributor,
+
+    /// <summary>Change anything in the ledger, except who it's shared with.</summary>
+    Editor
+}
+
+/// <summary>
+/// A ledger shared with another user. Starts as an invitation (<see cref="AcceptedAt"/> null) that
+/// shows nothing until accepted. The layer settings belong to the person it's shared with.
+/// </summary>
+public class LedgerMember
+{
+    public int Id { get; set; }
+    public int LedgerId { get; set; }
+    public Ledger? Ledger { get; set; }
+    public string UserId { get; set; } = "";
+    public LedgerRole Role { get; set; }
+    public DateTime InvitedAt { get; set; }
+    public DateTime? AcceptedAt { get; set; }
+
+    /// <summary>Whether the shared ledger is switched on, so its data shows alongside the person's own.</summary>
+    public bool IsVisible { get; set; } = true;
+
+    /// <summary>Hex color the person picked to tell this ledger's data apart.</summary>
+    public string? Color { get; set; }
+
+    /// <summary>Name the person gave this ledger; null shows "Owner's ledger".</summary>
+    public string? Nickname { get; set; }
+
+    public bool IsAccepted => AcceptedAt is not null;
+}
+
+/// <summary>A ledger entity with a name that's unique within its ledger (categories and payees).</summary>
+public interface INamedLedgerEntity : ILedgerEntity
+{
+    string Name { get; }
+}
+
 /// <summary>An app-wide setting managed by admins (not per user or ledger).</summary>
 public class AppSetting
 {
@@ -88,7 +133,7 @@ public interface ILedgerEntity
 }
 
 /// <summary>A company or person that bills are paid to, or that lends money for a loan.</summary>
-public class Payee : ILedgerEntity
+public class Payee : INamedLedgerEntity
 {
     public Payee Copy() => (Payee)MemberwiseClone();
 
@@ -105,7 +150,7 @@ public class Payee : ILedgerEntity
 }
 
 /// <summary>A user-defined group for bills, like "Utilities" or "Housing".</summary>
-public class Category : ILedgerEntity
+public class Category : INamedLedgerEntity
 {
     public Category Copy() => (Category)MemberwiseClone();
 

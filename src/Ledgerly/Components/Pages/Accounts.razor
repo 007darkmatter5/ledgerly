@@ -15,7 +15,7 @@
 </MudStack>
 
 <MudPaper Elevation="1">
-    <MudTable Items="_accounts" Hover="true" Loading="_loading" Breakpoint="Breakpoint.Sm" Elevation="0">
+    <MudTable Items="_accounts" Hover="true" Loading="_loading" Breakpoint="Breakpoint.Sm" Elevation="0" RowStyleFunc="RowStyle">
         <HeaderContent>
             <MudTh>Account</MudTh>
             <MudTh>Type</MudTh>
@@ -42,6 +42,7 @@
                         {
                             <MudText Typo="Typo.caption">Inactive</MudText>
                         }
+                        <LedgerTag LedgerId="context.LedgerId" />
                     </MudStack>
                 </MudStack>
             </MudTd>
@@ -60,12 +61,15 @@
                 <MudTooltip Text="Running balance">
                     <MudIconButton Icon="@Icons.Material.Filled.ShowChart" Size="Size.Small" Href="@($"projection?accounts={context.Id}")" aria-label="Running balance" />
                 </MudTooltip>
-                <MudTooltip Text="Update balance">
-                    <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="() => EditAsync(context)" aria-label="Edit" />
-                </MudTooltip>
-                <MudTooltip Text="Delete">
-                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="() => DeleteAsync(context)" aria-label="Delete" />
-                </MudTooltip>
+                @if (Scope.IsHome(context.LedgerId))
+                {
+                    <MudTooltip Text="Update balance">
+                        <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="() => EditAsync(context)" aria-label="Edit" />
+                    </MudTooltip>
+                    <MudTooltip Text="Delete">
+                        <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="() => DeleteAsync(context)" aria-label="Delete" />
+                    </MudTooltip>
+                }
             </MudTd>
         </RowTemplate>
         <NoRecordsContent>
@@ -79,12 +83,17 @@
     private List<Account> _accounts = [];
     private List<Bill> _bills = [];
 
+    [CascadingParameter] private LedgerScope Scope { get; set; } = LedgerScope.None;
+
+    private string RowStyle(Account account, int _) => Scope.RowStyle(account.LedgerId);
+
     protected override Task OnInitializedAsync() => LoadAsync();
 
     private async Task LoadAsync()
     {
-        _accounts = await Ledger.GetAccountsAsync();
-        _bills = await Ledger.GetBillsAsync();
+        // The user's own accounts first, then shared ones.
+        _accounts = (await Ledger.GetAccountsAsync(includeShared: true)).OrderBy(a => !Scope.IsHome(a.LedgerId)).ToList();
+        _bills = await Ledger.GetBillsAsync(includeShared: true);
         _loading = false;
     }
 

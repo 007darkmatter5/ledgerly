@@ -28,7 +28,7 @@
                    MultiSelectionTextFunc="@(_ => _selected.Count == _accounts.Count ? "All accounts" : string.Join(", ", _accounts.Where(a => _selected.Contains(a.Id)).Select(a => a.Name)))">
             @foreach (var account in _accounts)
             {
-                <MudSelectItem T="int" Value="account.Id">@account.Name</MudSelectItem>
+                <MudSelectItem T="int" Value="account.Id">@account.Name <LedgerTag LedgerId="account.LedgerId" /></MudSelectItem>
             }
         </MudSelect>
         <MudToggleGroup T="int" Value="_days" ValueChanged="OnDaysChanged" Color="Color.Primary" Size="Size.Small" Outlined="true">
@@ -126,11 +126,16 @@ else if (belowThreshold is not null)
                     <MudIcon Icon="@(context.IsTransfer ? Icons.Material.Filled.SwapHoriz : context.IsMoneyIn ? Icons.Material.Filled.ArrowDownward : Icons.Material.Filled.ArrowUpward)"
                              Color="@(context.IsMoneyIn && !context.IsTransfer ? Color.Success : Color.Default)" Size="Size.Small" />
                     <span>@context.Description</span>
-                    @if (context.Transaction is { } transaction)
+                    <LedgerTag LedgerId="LedgerOf(context.AccountId)" />
+                    @if (context.Transaction is { } transaction && Scope.IsHome(transaction.LedgerId))
                     {
                         <MudTooltip Text="A one-off transaction. Click to edit it.">
                             <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" OnClick="() => EditTransactionAsync(transaction)">Transaction</MudChip>
                         </MudTooltip>
+                    }
+                    else if (context.Transaction is not null)
+                    {
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">Transaction</MudChip>
                     }
                     else if (context.IsPaid)
                     {
@@ -167,6 +172,10 @@ else if (belowThreshold is not null)
 
     [SupplyParameterFromQuery(Name = "accounts")] private string? AccountsQuery { get; set; }
 
+    [CascadingParameter] private LedgerScope Scope { get; set; } = LedgerScope.None;
+
+    private int LedgerOf(int accountId) => _accounts.FirstOrDefault(a => a.Id == accountId)?.LedgerId ?? Scope.HomeLedgerId;
+
     private bool _loading = true;
     private List<Account> _accounts = [];
     private List<Bill> _bills = [];
@@ -195,24 +204,28 @@ else if (belowThreshold is not null)
 
     protected override async Task OnParametersSetAsync()
     {
-        _accounts = await Ledger.GetAccountsAsync(activeOnly: true);
-        _bills = await Ledger.GetBillsAsync();
-        _incomes = await Ledger.GetIncomesAsync();
-        _transfers = await Ledger.GetTransfersAsync();
-        _transactions = await Ledger.GetTransactionsAsync();
-        _unassignedBills = _bills.Count(b => b.IsActive && b.PayFromAccountId is null);
+        // The user's own accounts first, then those of shared ledgers that are switched on.
+        _accounts = (await Ledger.GetAccountsAsync(activeOnly: true, includeShared: true)).OrderBy(a => !Scope.IsHome(a.LedgerId)).ToList();
+        _bills = await Ledger.GetBillsAsync(includeShared: true);
+        _incomes = await Ledger.GetIncomesAsync(includeShared: true);
+        _transfers = await Ledger.GetTransfersAsync(includeShared: true);
+        _transactions = await Ledger.GetTransactionsAsync(includeShared: true);
+        _unassignedBills = _bills.Count(b => b.IsActive && b.PayFromAccountId is null && Scope.IsHome(b.LedgerId));
 
         var ledger = await Ledger.GetActiveLedgerAsync();
         _days = DayOptions.Contains(ledger.ProjectionDays ?? 0) ? ledger.ProjectionDays!.Value : 60;
         _mode = ledger.ProjectionWorstCase ? ProjectionMode.WorstCase : ProjectionMode.Expected;
 
-        // A link's ?accounts= wins, then the last selection, then checking accounts (where most bills come from).
+        // A link's ?accounts= wins, then the last selection, then the user's own checking accounts (where most bills
+        // come from), then their other accounts. Shared accounts are only included when chosen.
         var requested = ParseAccountIds(AccountsQuery);
         var remembered = ParseAccountIds(ledger.ProjectionAccountIds);
-        var checking = _accounts.Where(a => a.Type == AccountType.Checking).Select(a => a.Id).ToHashSet();
+        var own = _accounts.Where(a => Scope.IsHome(a.LedgerId)).ToList();
+        var checking = own.Where(a => a.Type == AccountType.Checking).Select(a => a.Id).ToHashSet();
         _selected = requested.Count > 0 ? requested
             : remembered.Count > 0 ? remembered
             : checking.Count > 0 ? checking
+            : own.Count > 0 ? own.Select(a => a.Id).ToHashSet()
             : _accounts.Select(a => a.Id).ToHashSet();
 
         Recalculate();
@@ -248,8 +261,8 @@ else if (belowThreshold is not null)
     {
         if (!await TransactionDialog.ShowAsync(Dialogs, transaction))
             return;
-        _transactions = await Ledger.GetTransactionsAsync();
-        _bills = await Ledger.GetBillsAsync(); // card payment estimates follow card transactions
+        _transactions = await Ledger.GetTransactionsAsync(includeShared: true);
+        _bills = await Ledger.GetBillsAsync(includeShared: true); // card payment estimates follow card transactions
         Recalculate();
     }
 

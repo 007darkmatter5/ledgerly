@@ -1,0 +1,257 @@
+@page "/sharing"
+@inject LedgerService Ledger
+@inject IDialogService Dialogs
+@inject ISnackbar Snackbar
+
+<PageTitle>Sharing · Ledgerly</PageTitle>
+
+<MudStack Spacing="0" Class="mb-4">
+    <MudText Typo="Typo.h4">Sharing</MudText>
+    <MudText Typo="Typo.body2" Class="mud-text-secondary">
+        Let someone else with an account here see your ledger, and choose which ledgers shared with you show alongside yours.
+    </MudText>
+</MudStack>
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+    return;
+}
+
+<MudGrid Spacing="3">
+    <MudItem xs="12" md="6">
+        <MudPaper Elevation="1" Class="pa-4 mb-3">
+            <MudText Typo="Typo.h6">Share your ledger</MudText>
+            <MudText Typo="Typo.body2" Class="mud-text-secondary mb-3">
+                They'll see your accounts, bills, income, transfers, transactions and loans, but can't change anything.
+                They're asked to accept first, and you can stop sharing at any time. Sample data is never shared.
+            </MudText>
+            @if (_shareError is not null)
+            {
+                <MudAlert Severity="Severity.Error" Dense="true" Class="mb-2">@_shareError</MudAlert>
+            }
+            <MudStack Row="true" AlignItems="AlignItems.Start" Spacing="2">
+                <MudTextField @bind-Value="_email" Label="Their email address" InputType="InputType.Email" Variant="Variant.Outlined" Margin="Margin.Dense"
+                              HelperText="The email they sign in to Ledgerly with" OnKeyUp="@(e => e.Key == "Enter" ? ShareAsync() : Task.CompletedTask)" Immediate="true" />
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Share" OnClick="ShareAsync" Disabled="_busy" Class="mt-1">Share</MudButton>
+            </MudStack>
+
+            @if (_shares.Count > 0)
+            {
+                <MudList T="string" Dense="true" Class="mt-2">
+                    @foreach (var share in _shares)
+                    {
+                        <MudListItem T="string">
+                            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                                <MudIcon Icon="@(share.IsAccepted ? Icons.Material.Filled.Visibility : Icons.Material.Filled.HourglassTop)" Size="Size.Small" />
+                                <MudStack Spacing="0" Class="flex-grow-1">
+                                    <MudText Typo="Typo.body2">@share.Name</MudText>
+                                    <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                                        @(share.Name == share.Email ? "" : $"{share.Email} · ")@(share.IsAccepted ? "can view your ledger" : "invited, waiting for them to accept")
+                                    </MudText>
+                                </MudStack>
+                                <MudButton Size="Size.Small" Color="Color.Error" OnClick="() => StopSharingAsync(share)">@(share.IsAccepted ? "Stop sharing" : "Cancel")</MudButton>
+                            </MudStack>
+                        </MudListItem>
+                    }
+                </MudList>
+            }
+        </MudPaper>
+
+        <MudPaper Elevation="1" Class="pa-4">
+            <MudText Typo="Typo.h6">Your name</MudText>
+            <MudText Typo="Typo.body2" Class="mud-text-secondary mb-2">What people you share with see, instead of your email address.</MudText>
+            <MudStack Row="true" AlignItems="AlignItems.Start" Spacing="2">
+                <MudTextField @bind-Value="_displayName" Label="Name" MaxLength="50" Variant="Variant.Outlined" Margin="Margin.Dense" HelperText="Leave blank to show your email address" />
+                <MudButton Variant="Variant.Outlined" Color="Color.Primary" OnClick="SaveNameAsync" Disabled="_busy" Class="mt-1">Save</MudButton>
+            </MudStack>
+        </MudPaper>
+    </MudItem>
+
+    <MudItem xs="12" md="6">
+        <MudPaper Elevation="1" Class="pa-4">
+            <MudText Typo="Typo.h6">Shared with you</MudText>
+            @if (_scope.HomeIsSample)
+            {
+                <MudAlert Severity="Severity.Info" Dense="true" Class="mt-2">Shared ledgers are hidden while you explore sample data.</MudAlert>
+            }
+            @if (_invitations.Count == 0 && _scope.Shared.Count == 0)
+            {
+                <MudText Typo="Typo.body2" Class="mud-text-secondary mt-1">Nobody has shared a ledger with you yet. When someone does, you'll be asked to accept it.</MudText>
+            }
+
+            @foreach (var invitation in _invitations)
+            {
+                <MudAlert Severity="Severity.Info" Class="mt-2" NoIcon="true">
+                    <MudText Typo="Typo.body2"><strong>@invitation.OwnerName</strong> (@invitation.OwnerEmail) wants to share their ledger with you, view only.</MudText>
+                    <div class="d-flex gap-2 mt-2">
+                        <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary" OnClick="() => RespondAsync(invitation, true)">Accept</MudButton>
+                        <MudButton Size="Size.Small" OnClick="() => RespondAsync(invitation, false)">Decline</MudButton>
+                    </div>
+                </MudAlert>
+            }
+
+            @foreach (var shared in _scope.Shared)
+            {
+                var draft = _drafts[shared.MemberId];
+                <MudPaper Outlined="true" Class="pa-3 mt-3" Style="@($"border-left: 4px solid {shared.Color}")">
+                    <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                        <MudSwitch T="bool" Value="shared.IsVisible" ValueChanged="v => SetVisibleAsync(shared, v)" Color="Color.Primary" aria-label="@($"Show {shared.Name}")" />
+                        <MudStack Spacing="0" Class="flex-grow-1">
+                            <MudText Typo="Typo.subtitle2">@shared.Name</MudText>
+                            <MudText Typo="Typo.caption" Class="mud-text-secondary">Shared by @shared.OwnerName · view only · @(shared.IsVisible ? "shown" : "hidden")</MudText>
+                        </MudStack>
+                        <MudButton Size="Size.Small" Color="Color.Error" OnClick="() => LeaveAsync(shared)">Leave</MudButton>
+                    </MudStack>
+                    <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Wrap="Wrap.Wrap" Class="mt-2">
+                        <MudTextField @bind-Value="draft.Nickname" Label="Name it" Placeholder="@($"{shared.OwnerName}'s ledger")" MaxLength="100"
+                                      Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:200px" />
+                        <div class="d-flex gap-1" role="radiogroup" aria-label="Color">
+                            @foreach (var color in LedgerService.LayerColors)
+                            {
+                                <button type="button" class="@($"color-swatch{(draft.Color == color ? " selected" : "")}")" style="@($"background:{color}")"
+                                        role="radio" aria-checked="@(draft.Color == color ? "true" : "false")" aria-label="@color" @onclick="() => draft.Color = color"></button>
+                            }
+                        </div>
+                        <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Primary" OnClick="() => SaveLayerAsync(shared, draft)"
+                                   Disabled="@(draft.Nickname == (shared.Name == $"{shared.OwnerName}'s ledger" ? null : shared.Name) && draft.Color == shared.Color)">Save</MudButton>
+                    </MudStack>
+                </MudPaper>
+            }
+        </MudPaper>
+    </MudItem>
+</MudGrid>
+
+@code {
+    private sealed class LayerDraft
+    {
+        public string? Nickname { get; set; }
+        public string Color { get; set; } = "";
+    }
+
+    [CascadingParameter(Name = "RefreshLedgers")] private Func<Task>? RefreshLedgers { get; set; }
+
+    private bool _loading = true;
+    private bool _busy;
+    private string? _email;
+    private string? _shareError;
+    private string? _displayName;
+    private LedgerScope _scope = LedgerScope.None;
+    private List<LedgerShare> _shares = [];
+    private List<LedgerInvitation> _invitations = [];
+    private Dictionary<int, LayerDraft> _drafts = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        _displayName = await Ledger.GetDisplayNameAsync();
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _scope = await Ledger.GetScopeAsync();
+        _shares = await Ledger.GetSharesAsync();
+        _invitations = await Ledger.GetInvitationsAsync();
+        _drafts = _scope.Shared.ToDictionary(s => s.MemberId, s => new LayerDraft
+        {
+            Nickname = s.Name == $"{s.OwnerName}'s ledger" ? null : s.Name,
+            Color = s.Color
+        });
+        _loading = false;
+    }
+
+    /// <summary>Reloads this page and the Ledgers menu (which re-creates the page).</summary>
+    private async Task ChangedAsync()
+    {
+        if (RefreshLedgers is not null)
+            await RefreshLedgers();
+        else
+            await LoadAsync();
+    }
+
+    private async Task ShareAsync()
+    {
+        if (_busy || string.IsNullOrWhiteSpace(_email))
+            return;
+        _busy = true;
+        _shareError = null;
+        try
+        {
+            await Ledger.ShareAsync(_email);
+            Snackbar.Add($"Invitation sent to {_email.Trim()}. It shows up for them right away.", Severity.Success);
+            _email = null;
+            _shares = await Ledger.GetSharesAsync();
+        }
+        catch (LedgerValidationException ex)
+        {
+            _shareError = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task StopSharingAsync(LedgerShare share)
+    {
+        var confirmed = await Dialogs.ShowMessageBoxAsync(share.IsAccepted ? "Stop sharing?" : "Cancel invitation?",
+            share.IsAccepted ? $"{share.Name} will no longer see your ledger. You can share it again later." : $"Withdraw the invitation to {share.Name}?",
+            yesText: share.IsAccepted ? "Stop sharing" : "Cancel invitation", cancelText: "Keep");
+        if (confirmed != true)
+            return;
+        await Ledger.StopSharingAsync(share.MemberId);
+        _shares = await Ledger.GetSharesAsync();
+    }
+
+    private async Task SaveNameAsync()
+    {
+        try
+        {
+            await Ledger.SetDisplayNameAsync(_displayName);
+            Snackbar.Add("Name saved", Severity.Success);
+        }
+        catch (LedgerValidationException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+    }
+
+    private async Task RespondAsync(LedgerInvitation invitation, bool accept)
+    {
+        await Ledger.RespondToInvitationAsync(invitation.MemberId, accept);
+        Snackbar.Add(accept ? $"{invitation.OwnerName}'s ledger added" : "Invitation declined", accept ? Severity.Success : Severity.Info);
+        await ChangedAsync();
+    }
+
+    private async Task SetVisibleAsync(SharedLedger shared, bool visible)
+    {
+        await Ledger.SetSharedVisibleAsync(shared.MemberId, visible);
+        await ChangedAsync();
+    }
+
+    private async Task SaveLayerAsync(SharedLedger shared, LayerDraft draft)
+    {
+        try
+        {
+            await Ledger.UpdateSharedLedgerAsync(shared.MemberId, draft.Nickname, draft.Color);
+            Snackbar.Add("Saved", Severity.Success);
+            await ChangedAsync();
+        }
+        catch (LedgerValidationException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+    }
+
+    private async Task LeaveAsync(SharedLedger shared)
+    {
+        var confirmed = await Dialogs.ShowMessageBoxAsync("Leave this ledger?",
+            $"You'll stop seeing {shared.Name}. {shared.OwnerName} would have to share it again for you to see it. To just hide it for now, switch it off instead.",
+            yesText: "Leave", cancelText: "Cancel");
+        if (confirmed != true)
+            return;
+        await Ledger.LeaveSharedLedgerAsync(shared.MemberId);
+        Snackbar.Add($"You left {shared.Name}", Severity.Info);
+        await ChangedAsync();
+    }
+}

@@ -49,13 +49,13 @@ else
         <MudItem xs="12" sm="6" lg="3">
             <StatCard Label="Account balances" Icon="@Icons.Material.Filled.AccountBalance">
                 <Value><Money Value="_accounts.Sum(a => a.Balance)" /></Value>
-                <Caption>@_accounts.Count active account@(_accounts.Count == 1 ? "" : "s")</Caption>
+                <Caption>@_accounts.Count active account@(_accounts.Count == 1 ? "" : "s")@SharedNote</Caption>
             </StatCard>
         </MudItem>
         <MudItem xs="12" sm="6" lg="3">
             <StatCard Label="Due in the next 30 days" Icon="@Icons.Material.Filled.ReceiptLong">
                 <Value><Money Value="_upcoming30.Where(d => !d.IsPaid).Sum(d => d.Amount)" Colored="false" /></Value>
-                <Caption>@_upcoming30.Count(d => !d.IsPaid) unpaid bill@(_upcoming30.Count(d => !d.IsPaid) == 1 ? "" : "s")</Caption>
+                <Caption>@_upcoming30.Count(d => !d.IsPaid) unpaid bill@(_upcoming30.Count(d => !d.IsPaid) == 1 ? "" : "s")@SharedNote</Caption>
             </StatCard>
         </MudItem>
         <MudItem xs="12" sm="6" lg="3">
@@ -67,7 +67,7 @@ else
         <MudItem xs="12" sm="6" lg="3">
             <StatCard Label="Loan balances" Icon="@Icons.Material.Filled.RealEstateAgent" Href="loans">
                 <Value><Money Value="_loans.Sum(l => LoanMath.CurrentBalance(l, Ledger.Today, ExtrasFor(l)))" Colored="false" /></Value>
-                <Caption>@_loans.Sum(l => LoanMath.Payment(l) + l.ExtraPrincipal).ToString("C") / month</Caption>
+                <Caption>@_loans.Sum(l => LoanMath.Payment(l) + l.ExtraPrincipal).ToString("C") / month@SharedNote</Caption>
             </StatCard>
         </MudItem>
 
@@ -89,13 +89,14 @@ else
                     var belowThreshold = projection.FirstBelowThreshold;
                     var stale = Ledger.Today.DayNumber - account.BalanceAsOf.DayNumber > 14;
                     <MudItem xs="12" sm="6" md="4">
-                        <MudCard Elevation="1" Style="height:100%">
+                        <MudCard Elevation="1" Style="@($"height:100%; {Scope.RowStyle(account.LedgerId)}")">
                             <MudCardHeader>
                                 <CardHeaderAvatar>
                                     <MudAvatar Color="Color.Primary" Variant="Variant.Outlined"><MudIcon Icon="@Display.Icon(account.Type)" /></MudAvatar>
                                 </CardHeaderAvatar>
                                 <CardHeaderContent>
                                     <MudText Typo="Typo.subtitle1">@account.Name</MudText>
+                                    <LedgerTag LedgerId="account.LedgerId" />
                                     <MudText Typo="Typo.caption" Class="@(stale ? "mud-warning-text" : "mud-text-secondary")">
                                         Balance as of @Display.Date(account.BalanceAsOf)@(stale ? " · update it?" : "")
                                     </MudText>
@@ -186,7 +187,7 @@ else
                         var paidPercent = loan.OriginalPrincipal > 0 ? (double)((loan.OriginalPrincipal - balance) / loan.OriginalPrincipal * 100m) : 0;
                         <MudLink Href="@($"loans/{loan.Id}")" Underline="Underline.None" Color="Color.Inherit">
                             <MudStack Row="true" Justify="Justify.SpaceBetween">
-                                <MudText Typo="Typo.body2">@loan.Name</MudText>
+                                <MudText Typo="Typo.body2">@loan.Name <LedgerTag LedgerId="loan.LedgerId" /></MudText>
                                 <MudText Typo="Typo.body2">@balance.ToString("C")</MudText>
                             </MudStack>
                             <MudProgressLinear Value="Math.Clamp(paidPercent, 0, 100)" Color="Color.Primary" Rounded="true" Size="Size.Small" Class="my-1" />
@@ -212,12 +213,17 @@ else
     private List<BillDue> _overdue = [];
     private int _unassignedBills;
 
+    [CascadingParameter] private LedgerScope Scope { get; set; } = LedgerScope.None;
+
+    /// <summary>Noted under totals that include shared ledgers.</summary>
+    private string SharedNote => Scope.HasVisibleShared ? " · including shared" : "";
+
     protected override Task OnInitializedAsync() => LoadAsync();
 
     private async Task LoadAsync()
     {
         _isSample = (await Ledger.GetActiveLedgerAsync()).IsSample;
-        _hasData = await Ledger.HasAnyDataAsync();
+        _hasData = await Ledger.HasAnyDataAsync(includeShared: true);
         if (!_hasData)
         {
             _loading = false;
@@ -225,21 +231,24 @@ else
         }
 
         var today = Ledger.Today;
-        _accounts = await Ledger.GetAccountsAsync(activeOnly: true);
-        _loans = (await Ledger.GetLoansAsync()).Where(l => l.IsActive).ToList();
-        var bills = await Ledger.GetBillsAsync();
+        // The user's own accounts and loans first, then those of shared ledgers that are switched on.
+        _accounts = (await Ledger.GetAccountsAsync(activeOnly: true, includeShared: true)).OrderBy(a => !Scope.IsHome(a.LedgerId)).ToList();
+        _loans = (await Ledger.GetLoansAsync(includeShared: true)).Where(l => l.IsActive).OrderBy(l => !Scope.IsHome(l.LedgerId)).ToList();
+        var bills = await Ledger.GetBillsAsync(includeShared: true);
         _loanExtras = _loans.ToDictionary(l => l.Id, l => LoanPayments.ExtrasFor(l, bills, today));
-        var incomes = await Ledger.GetIncomesAsync();
-        var transfers = await Ledger.GetTransfersAsync();
-        var transactions = await Ledger.GetTransactionsAsync();
+        var incomes = await Ledger.GetIncomesAsync(includeShared: true);
+        var transfers = await Ledger.GetTransfersAsync(includeShared: true);
+        var transactions = await Ledger.GetTransactionsAsync(includeShared: true);
 
         _projections = _accounts
             .Select(a => (a, Projection.Build([a], bills, incomes, transfers, transactions, today.AddDays(30))))
             .ToList();
 
         _upcoming30 = BillSchedule.Between(bills, today, today.AddDays(30)).ToList();
-        _overdue = BillSchedule.Between(bills, today.AddDays(-90), today.AddDays(-1)).Where(d => d.IsOverdue(today)).ToList();
-        _unassignedBills = bills.Count(b => b.IsActive && b.PayFromAccountId is null);
+        // Overdue and unassigned bills are things to act on, so only the user's own count.
+        var mine = bills.Where(b => Scope.IsHome(b.LedgerId)).ToList();
+        _overdue = BillSchedule.Between(mine, today.AddDays(-90), today.AddDays(-1)).Where(d => d.IsOverdue(today)).ToList();
+        _unassignedBills = mine.Count(b => b.IsActive && b.PayFromAccountId is null);
         _loading = false;
     }
 

@@ -1,10 +1,13 @@
 @inherits LayoutComponentBase
+@implements IDisposable
+@using System.Security.Claims
 @inject LedgerService Ledger
 @inject NavigationManager Navigation
 @inject IDialogService Dialogs
 @inject ISnackbar Snackbar
 @inject IJSRuntime JS
 @inject AppInfo App
+@inject SharingNotifier Notifier
 
 <MudThemeProvider @ref="_themeProvider" Theme="_theme" @bind-IsDarkMode="_isDarkMode" />
 <MudPopoverProvider />
@@ -32,6 +35,62 @@
             <MudTooltip Text="Add a transaction">
                 <MudIconButton Icon="@Icons.Material.Filled.AddCard" Color="Color.Inherit" OnClick="AddTransactionAsync" aria-label="Add a transaction" />
             </MudTooltip>
+            <MudMenu AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight" ListClass="ledgers-menu">
+                <ActivatorContent>
+                    <MudTooltip Text="@(_invitations.Count > 0 ? "Ledgers: someone shared a ledger with you" : "Ledgers")">
+                        <MudBadge Content="_invitations.Count" Visible="_invitations.Count > 0" Color="Color.Error" Overlap="true">
+                            <button type="button" class="appbar-button" aria-label="Ledgers" @onclick="@(e => context.ToggleAsync(e))">
+                                <MudIcon Icon="@Icons.Material.Filled.Layers" />
+                            </button>
+                        </MudBadge>
+                    </MudTooltip>
+                </ActivatorContent>
+                <ChildContent>
+                    <div class="px-4 pt-2 pb-1">
+                        <MudText Typo="Typo.subtitle2">Ledgers</MudText>
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary">Switch on ledgers shared with you to see them alongside yours.</MudText>
+                    </div>
+                    <MudMenuItem Icon="@Icons.Material.Filled.CheckBox" IconColor="Color.Primary" Disabled="true">
+                        @(_ledger?.IsSample == true ? "Sample data" : "My ledger") <span class="mud-text-secondary">· always shown</span>
+                    </MudMenuItem>
+                    @if (_ledger?.IsSample == true && _scope.Shared.Count > 0)
+                    {
+                        <MudText Typo="Typo.caption" Class="px-4 d-block mud-text-secondary">Shared ledgers are hidden while you explore sample data.</MudText>
+                    }
+                    else
+                    {
+                        @foreach (var shared in _scope.Shared)
+                        {
+                            <MudMenuItem AutoClose="false" OnClick="() => SetVisibleAsync(shared.MemberId, !shared.IsVisible)"
+                                         Icon="@(shared.IsVisible ? Icons.Material.Filled.CheckBox : Icons.Material.Filled.CheckBoxOutlineBlank)">
+                                <span class="d-inline-flex align-center gap-2" aria-label="@($"{shared.Name}, shared by {shared.OwnerName}, {(shared.IsVisible ? "shown" : "hidden")}")">
+                                    <span class="ledger-dot" style="@($"--ledger-color:{shared.Color}")"></span>
+                                    <span>@shared.Name</span>
+                                    <span class="mud-text-secondary">· @shared.OwnerName@(shared.IsReadOnly ? " · view only" : "")</span>
+                                </span>
+                            </MudMenuItem>
+                        }
+                        @if (_scope.Shared.Count > 1)
+                        {
+                            <MudMenuItem AutoClose="false" Icon="@Icons.Material.Filled.PersonOutline" OnClick="() => SetVisibleAsync(null, false)">Only mine</MudMenuItem>
+                            <MudMenuItem AutoClose="false" Icon="@Icons.Material.Filled.Layers" OnClick="() => SetVisibleAsync(null, true)">Show all</MudMenuItem>
+                        }
+                    }
+                    @foreach (var invitation in _invitations)
+                    {
+                        <MudDivider />
+                        <div class="px-4 py-2">
+                            <MudText Typo="Typo.body2"><strong>@invitation.OwnerName</strong> wants to share their ledger with you (view only).</MudText>
+                            <div class="d-flex gap-2 mt-1">
+                                <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary" OnClick="() => RespondAsync(invitation, true)">Accept</MudButton>
+                                <MudButton Size="Size.Small" OnClick="() => RespondAsync(invitation, false)">Decline</MudButton>
+                            </div>
+                        </div>
+                    }
+                    <MudDivider />
+                    <MudMenuItem Icon="@Icons.Material.Filled.Share" Href="sharing">Sharing settings</MudMenuItem>
+                </ChildContent>
+            </MudMenu>
         }
         <MudTooltip Text="@(_isDarkMode ? "Light mode" : "Dark mode")">
             <MudIconButton Icon="@(_isDarkMode ? Icons.Material.Filled.LightMode : Icons.Material.Filled.DarkMode)" Color="Color.Inherit" OnClick="() => _isDarkMode = !_isDarkMode" aria-label="Toggle dark mode" />
@@ -85,10 +144,14 @@
             </MudAlert>
         }
         <MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="py-6">
-            @* Re-keyed after a quick-add so the page underneath reloads its data. *@
-            <div @key="_bodyVersion">
-                @Body
-            </div>
+            @* Re-keyed after a quick-add or a sharing change so the page underneath reloads its data. *@
+            <CascadingValue Value="_scope">
+                <CascadingValue Name="RefreshLedgers" Value="_refreshLedgers">
+                    <div @key="_bodyVersion">
+                        @Body
+                    </div>
+                </CascadingValue>
+            </CascadingValue>
         </MudContainer>
     </MudMainContent>
 </MudLayout>
@@ -115,6 +178,11 @@
     private Ledger? _ledger;
     private bool _hasSample;
     private int _bodyVersion;
+    private string? _userId;
+    private LedgerScope _scope = LedgerScope.None;
+    private List<LedgerInvitation> _invitations = [];
+    private readonly HashSet<int> _prompted = [];
+    private Func<Task> _refreshLedgers = null!;
 
     private string Initial => string.IsNullOrEmpty(_email) ? "?" : _email[..1].ToUpperInvariant();
 
@@ -135,22 +203,98 @@
 
     protected override async Task OnInitializedAsync()
     {
+        // Pages that change sharing (the Sharing page) call this so the Ledgers menu and the page reload.
+        _refreshLedgers = async () =>
+        {
+            await RefreshSharingAsync();
+            StateHasChanged();
+        };
+
         var state = await AuthenticationState;
         if (state.User.Identity?.IsAuthenticated != true)
             return;
 
         _email = state.User.Identity.Name;
+        _userId = state.User.FindFirstValue(ClaimTypes.NameIdentifier);
         _ledger = await Ledger.GetActiveLedgerAsync();
         _hasSample = await Ledger.HasSampleLedgerAsync();
+        await LoadSharingAsync();
+        Notifier.Changed += OnSharingChanged;
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (firstRender && _themeProvider is not null)
+        if (!firstRender)
+            return;
+        if (_themeProvider is not null)
         {
             _isDarkMode = await _themeProvider.GetSystemDarkModeAsync();
             StateHasChanged();
         }
+        await PromptInvitationsAsync();
+    }
+
+    public void Dispose() => Notifier.Changed -= OnSharingChanged;
+
+    private async Task LoadSharingAsync()
+    {
+        _scope = await Ledger.GetScopeAsync();
+        _invitations = await Ledger.GetInvitationsAsync();
+    }
+
+    /// <summary>Reloads the shared ledgers and the page after a change, like switching one on or off.</summary>
+    private async Task RefreshSharingAsync()
+    {
+        await LoadSharingAsync();
+        _bodyVersion++;
+    }
+
+    // Another user shared, unshared or answered: update this tab straight away.
+    private void OnSharingChanged(string userId)
+    {
+        if (userId != _userId)
+            return;
+        _ = InvokeAsync(async () =>
+        {
+            try
+            {
+                await RefreshSharingAsync();
+                StateHasChanged();
+                await PromptInvitationsAsync();
+            }
+            catch (Exception)
+            {
+                // The page picks the change up on its next load; a background refresh must never break the session.
+            }
+        });
+    }
+
+    /// <summary>Asks once per session about each new invitation. "Later" leaves it waiting in the Ledgers menu.</summary>
+    private async Task PromptInvitationsAsync()
+    {
+        foreach (var invitation in _invitations.Where(i => _prompted.Add(i.MemberId)).ToList())
+        {
+            var answer = await Dialogs.ShowMessageBoxAsync($"{invitation.OwnerName} shared a ledger with you",
+                $"Accept to see {invitation.OwnerName}'s accounts, bills and payments alongside your own, marked in their own color. " +
+                "It's view only: you can't change anything in it. You can switch it off or leave it at any time.",
+                yesText: "Accept", noText: "Decline", cancelText: "Later");
+            if (answer is { } accept)
+                await RespondAsync(invitation, accept);
+        }
+    }
+
+    private async Task RespondAsync(LedgerInvitation invitation, bool accept)
+    {
+        await Ledger.RespondToInvitationAsync(invitation.MemberId, accept);
+        Snackbar.Add(accept ? $"{invitation.OwnerName}'s ledger added. Switch it on or off from the Ledgers button." : "Invitation declined",
+            accept ? Severity.Success : Severity.Info);
+        await RefreshSharingAsync();
+    }
+
+    private async Task SetVisibleAsync(int? memberId, bool visible)
+    {
+        await Ledger.SetSharedVisibleAsync(memberId, visible);
+        await RefreshSharingAsync();
     }
 
     // Ledger changes reload the app so every page and cached value reflects the new ledger.

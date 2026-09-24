@@ -1,7 +1,7 @@
 @inject IDialogService Dialogs
 @inject LedgerService Ledger
 
-<MudTable Items="Items" Dense="true" Hover="true" Elevation="0" Breakpoint="Breakpoint.Sm">
+<MudTable Items="Items" Dense="true" Hover="true" Elevation="0" Breakpoint="Breakpoint.Sm" RowStyleFunc="RowStyle">
     <HeaderContent>
         <MudTh>Due</MudTh>
         <MudTh>Bill</MudTh>
@@ -25,6 +25,7 @@
             <MudText Typo="Typo.body2">
                 @context.Bill.Name
                 <ExternalLink Url="@payee?.WebsiteUrl" IconOnly="true" Title="@($"Pay on the {payee?.Name} website")" />
+                <LedgerTag LedgerId="context.Bill.LedgerId" />
             </MudText>
             @if (context.Bill.Loan is { } loan)
             {
@@ -83,15 +84,22 @@
             }
         </MudTd>
         <MudTd Style="text-align:right; white-space:nowrap">
-            @if (!context.IsPaid)
+            @if (!IsMine(context))
             {
-                <MudTooltip Text="Mark paid">
-                    <MudIconButton Icon="@Icons.Material.Filled.TaskAlt" Color="Color.Success" Size="Size.Small" OnClick="() => OpenAsync(context, markPaid: true)" aria-label="Mark paid" />
+                <MudTooltip Text="Shared with you, view only"><MudIcon Icon="@Icons.Material.Filled.Lock" Size="Size.Small" Class="mud-text-secondary" /></MudTooltip>
+            }
+            else
+            {
+                @if (!context.IsPaid)
+                {
+                    <MudTooltip Text="Mark paid">
+                        <MudIconButton Icon="@Icons.Material.Filled.TaskAlt" Color="Color.Success" Size="Size.Small" OnClick="() => OpenAsync(context, markPaid: true)" aria-label="Mark paid" />
+                    </MudTooltip>
+                }
+                <MudTooltip Text="Amount, payment & notes">
+                    <MudIconButton Icon="@Icons.Material.Filled.EditNote" Size="Size.Small" OnClick="() => OpenAsync(context, markPaid: false)" aria-label="Edit this due date" />
                 </MudTooltip>
             }
-            <MudTooltip Text="Amount, payment & notes">
-                <MudIconButton Icon="@Icons.Material.Filled.EditNote" Size="Size.Small" OnClick="() => OpenAsync(context, markPaid: false)" aria-label="Edit this due date" />
-            </MudTooltip>
         </MudTd>
     </RowTemplate>
     <NoRecordsContent>
@@ -104,6 +112,13 @@
     [Parameter] public bool ShowAccount { get; set; } = true;
     [Parameter] public string EmptyText { get; set; } = "Nothing due.";
     [Parameter] public EventCallback OnChanged { get; set; }
+
+    [CascadingParameter] public LedgerScope? Scope { get; set; }
+
+    /// <summary>In the user's own ledger, so it can be marked paid and edited.</summary>
+    private bool IsMine(BillDue due) => Scope?.IsHome(due.Bill.LedgerId) ?? true;
+
+    private string RowStyle(BillDue due, int _) => Scope?.RowStyle(due.Bill.LedgerId) ?? "";
 
     private async Task OpenAsync(BillDue due, bool markPaid)
     {

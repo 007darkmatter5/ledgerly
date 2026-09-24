@@ -23,7 +23,7 @@
 
 <MudTabs Elevation="1" Rounded="true" TabPanelsClass="pa-2" @bind-ActivePanelIndex="_tab">
     <MudTabPanel Text="All transfers" Icon="@Icons.Material.Filled.List">
-        <MudTable Items="Filtered" Hover="true" Loading="_loading" Breakpoint="Breakpoint.Sm" Elevation="0">
+        <MudTable Items="Filtered" Hover="true" Loading="_loading" Breakpoint="Breakpoint.Sm" Elevation="0" RowStyleFunc="RowStyle">
             <ToolBarContent>
                 <MudSwitch @bind-Value="_showInactive" Label="Show inactive" Color="Color.Primary" />
             </ToolBarContent>
@@ -40,6 +40,7 @@
             <RowTemplate>
                 <MudTd DataLabel="Transfer">
                     <MudText Class="@(context.IsActive ? null : "mud-text-disabled")">@context.Name</MudText>
+                    <LedgerTag LedgerId="context.LedgerId" />
                     <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center">
                         @if (context.IsAutomatic)
                         {
@@ -68,12 +69,15 @@
                 <MudTd DataLabel="To">@context.ToAccount?.Name</MudTd>
                 <MudTd DataLabel="Per month" Style="text-align:right">@Recurrence.MonthlyEquivalent(context.Frequency, context.Amount).ToString("C")</MudTd>
                 <MudTd Style="text-align:right; white-space:nowrap">
-                    <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="() => EditAsync(context)" aria-label="Edit" />
-                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="() => DeleteAsync(context)" aria-label="Delete" />
+                    @if (Scope.IsHome(context.LedgerId))
+                    {
+                        <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="() => EditAsync(context)" aria-label="Edit" />
+                        <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="() => DeleteAsync(context)" aria-label="Delete" />
+                    }
                 </MudTd>
             </RowTemplate>
             <FooterContent>
-                <MudTd colspan="6" Style="text-align:right"><strong>Total per month (active)</strong></MudTd>
+                <MudTd colspan="6" Style="text-align:right"><strong>Total per month (active@(Scope.HasVisibleShared ? ", including shared" : ""))</strong></MudTd>
                 <MudTd Style="text-align:right"><strong>@Filtered.Where(t => t.IsActive).Sum(t => Recurrence.MonthlyEquivalent(t.Frequency, t.Amount)).ToString("C")</strong></MudTd>
                 <MudTd />
             </FooterContent>
@@ -102,7 +106,7 @@
             </MudStack>
         </MudStack>
 
-        <MudTable Items="MonthSchedule" Hover="true" Breakpoint="Breakpoint.Sm" Elevation="0">
+        <MudTable Items="MonthSchedule" Hover="true" Breakpoint="Breakpoint.Sm" Elevation="0" RowStyleFunc="DueRowStyle">
             <HeaderContent>
                 <MudTh>Date</MudTh>
                 <MudTh>Transfer</MudTh>
@@ -114,7 +118,7 @@
             </HeaderContent>
             <RowTemplate>
                 <MudTd DataLabel="Date">@Display.ShortDate(context.ScheduledDate)</MudTd>
-                <MudTd DataLabel="Transfer">@context.Transfer.Name</MudTd>
+                <MudTd DataLabel="Transfer">@context.Transfer.Name <LedgerTag LedgerId="context.Transfer.LedgerId" /></MudTd>
                 <MudTd DataLabel="From">@context.Transfer.FromAccount?.Name</MudTd>
                 <MudTd DataLabel="To">@context.Transfer.ToAccount?.Name</MudTd>
                 <MudTd DataLabel="Amount" Style="text-align:right">@context.Amount.ToString("C")</MudTd>
@@ -137,7 +141,10 @@
                     }
                 </MudTd>
                 <MudTd Style="text-align:right; white-space:nowrap">
-                    <MudButton Size="Size.Small" OnClick="() => RecordAsync(context)">@(context.IsDone ? "Edit" : "Record")</MudButton>
+                    @if (Scope.IsHome(context.Transfer.LedgerId))
+                    {
+                        <MudButton Size="Size.Small" OnClick="() => RecordAsync(context)">@(context.IsDone ? "Edit" : "Record")</MudButton>
+                    }
                 </MudTd>
             </RowTemplate>
             <NoRecordsContent>
@@ -155,6 +162,12 @@
     private int _tab;
     private DateOnly _month;
     private List<Transfer> _transfers = [];
+
+    [CascadingParameter] private LedgerScope Scope { get; set; } = LedgerScope.None;
+
+    private string RowStyle(Transfer transfer, int _) => Scope.RowStyle(transfer.LedgerId);
+
+    private string DueRowStyle(TransferDue due, int _) => Scope.RowStyle(due.Transfer.LedgerId);
     private List<TransferDue> _missed = [];
 
     private DateOnly ThisMonth => new(Ledger.Today.Year, Ledger.Today.Month, 1);
@@ -172,8 +185,9 @@
 
     private async Task LoadAsync()
     {
-        _transfers = await Ledger.GetTransfersAsync();
-        _missed = TransferSchedule.Between(_transfers, Ledger.Today.AddDays(-90), Ledger.Today.AddDays(-1))
+        _transfers = await Ledger.GetTransfersAsync(includeShared: true);
+        // Only the user's own transfers are theirs to record.
+        _missed = TransferSchedule.Between(_transfers.Where(t => Scope.IsHome(t.LedgerId)), Ledger.Today.AddDays(-90), Ledger.Today.AddDays(-1))
             .Where(d => d.IsMissed(Ledger.Today))
             .ToList();
         _loading = false;

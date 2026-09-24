@@ -21,7 +21,10 @@
 
 <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-4" Wrap="Wrap.Wrap">
     <MudStack Spacing="0">
-        <MudText Typo="Typo.h4">@_card.Name</MudText>
+        <MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center">
+            <MudText Typo="Typo.h4">@_card.Name</MudText>
+            <LedgerTag LedgerId="_card.LedgerId" />
+        </MudStack>
         <MudText Typo="Typo.body2" Class="mud-text-secondary">
             @(_card.CreditLimit is { } limit ? $"{limit:C0} limit" : "No limit set")
             · @(_card.AprPercent is { } apr ? $"{apr:0.##}% APR" : "no APR set")
@@ -32,7 +35,10 @@
     <MudSpacer />
     <MudStack Row="true" Spacing="2" Wrap="Wrap.Wrap">
         <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.ShowChart" Href="@($"projection?accounts={_card.Id}")">Running balance</MudButton>
-        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Edit" OnClick="EditCardAsync">Edit card</MudButton>
+        @if (IsMine)
+        {
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Edit" OnClick="EditCardAsync">Edit card</MudButton>
+        }
     </MudStack>
 </MudStack>
 
@@ -66,7 +72,7 @@
     </MudItem>
 </MudGrid>
 
-@if (_card.StatementDay is null)
+@if (_card.StatementDay is null && IsMine)
 {
     <MudAlert Severity="Severity.Info" Class="mb-3" Dense="true">
         Set the day the statement closes (<MudLink OnClick="EditCardAsync">Edit card</MudLink>) for accurate statement and payment estimates.
@@ -155,10 +161,13 @@
                             · @Display.Of(bill.Frequency).ToLowerInvariant() from @(bill.PayFromAccount?.Name ?? "no account")@(bill.AutoPay ? " · autopay" : "")@(bill.IsActive ? "" : " · inactive")
                         </MudText>
                     </MudStack>
-                    <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="() => EditBillAsync(bill)" aria-label="@($"Edit {bill.Name}")" />
+                    @if (IsMine)
+                    {
+                        <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="() => EditBillAsync(bill)" aria-label="@($"Edit {bill.Name}")" />
+                    }
                 </MudStack>
             }
-            @if (!_paymentBills.Any(b => b.IsActive))
+            @if (IsMine && !_paymentBills.Any(b => b.IsActive))
             {
                 <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.Add" OnClick="() => EditBillAsync(null)">Set up payment</MudButton>
             }
@@ -231,6 +240,11 @@
     private List<StatementRow> _statements = [];
     private List<BreadcrumbItem> _breadcrumbs = [];
 
+    [CascadingParameter] private LedgerScope Scope { get; set; } = LedgerScope.None;
+
+    /// <summary>A card in a ledger shared with the user is view only.</summary>
+    private bool IsMine => _card is not null && Scope.IsHome(_card.LedgerId);
+
     private List<ChartSeries<double>> _series = [];
     private string[] _labels = [];
     private readonly LineChartOptions _chartOptions = new()
@@ -249,7 +263,7 @@
     private async Task LoadAsync()
     {
         var today = Ledger.Today;
-        _card = (await Ledger.GetAccountsAsync()).FirstOrDefault(a => a.Id == Id && a.IsCreditCard);
+        _card = (await Ledger.GetAccountsAsync(includeShared: true)).FirstOrDefault(a => a.Id == Id && a.IsCreditCard);
         _breadcrumbs = [new("Credit cards", "cards"), new(_card?.Name ?? "Not found", null, disabled: true)];
         if (_card is null)
         {
@@ -257,13 +271,13 @@
             return;
         }
 
-        var bills = await Ledger.GetBillsAsync();
+        var bills = await Ledger.GetBillsAsync(includeShared: true);
         _paymentBills = bills.Where(b => b.CardAccountId == _card.Id).OrderBy(b => !b.IsActive).ThenBy(b => b.Name).ToList();
         _charges = bills.Where(b => b.PayFromAccountId == _card.Id).OrderBy(b => !b.IsActive).ThenBy(b => b.Name).ToList();
         _statementDay = CreditCards.StatementDay(_card, bills);
 
         var through = today.AddMonths(6);
-        _transactions = (await Ledger.GetTransactionsAsync()).Where(t => t.AccountId == _card.Id).ToList();
+        _transactions = (await Ledger.GetTransactionsAsync(includeShared: true)).Where(t => t.AccountId == _card.Id).ToList();
         _simulation = CreditCards.Simulate(_card, bills, _transactions, through);
         _owedNow = _simulation.OwedOn(today);
         _nextPayment = _simulation.Entries.FirstOrDefault(e => e.Kind == CardEntryKind.Payment && e.Date >= today);
