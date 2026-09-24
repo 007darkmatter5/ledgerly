@@ -112,7 +112,8 @@ try {
   const transactionDialog = page.locator('.mud-dialog');
   await transactionDialog.getByLabel('Amount').fill('62.40');
   await transactionDialog.getByLabel('What was it for?').fill('E2E Dinner out');
-  await page.click('.mud-dialog button:text-is("Save")');
+  // Exactly "Save": "Save & add another" comes first and would keep the dialog open.
+  await transactionDialog.getByRole('button', { name: 'Save', exact: true }).click();
   const transactionRow = await page.waitForSelector('.mud-table-body tr:has-text("E2E Dinner out")', { timeout: 5000 }).then((h) => h, () => null);
   const transactionText = transactionRow === null ? '' : await transactionRow.innerText();
   const transactionListed = transactionText.includes('62.40') && transactionText.includes('E2E Checking');
