@@ -4,10 +4,13 @@ namespace Ledgerly.Finance;
 
 public enum CardEntryKind
 {
-    /// <summary>A bill charged to the card.</summary>
+    /// <summary>A bill or transaction charged to the card (a refund is a negative charge).</summary>
     Charge,
 
-    /// <summary>The card's typical monthly spending that isn't a bill, added when a statement closes.</summary>
+    /// <summary>
+    /// The card's typical monthly spending that isn't a bill, added when a statement closes, less whatever
+    /// transactions were logged on the card during that cycle.
+    /// </summary>
     Spending,
 
     /// <summary>Interest added when a statement closes after the previous one wasn't paid in full.</summary>
@@ -18,7 +21,8 @@ public enum CardEntryKind
 }
 
 /// <summary>One change to a card's balance. <paramref name="Amount"/> is the change in the amount owed (payments are negative).</summary>
-public record CardEntry(DateOnly Date, CardEntryKind Kind, string Description, decimal Amount, decimal Owed, Bill? Bill = null, DateOnly? DueDate = null, bool IsEstimate = false);
+public record CardEntry(DateOnly Date, CardEntryKind Kind, string Description, decimal Amount, decimal Owed, Bill? Bill = null, DateOnly? DueDate = null, bool IsEstimate = false,
+    Transaction? Transaction = null);
 
 /// <summary>A projected statement: what's owed when it closes, and the minimum payment on it.</summary>
 public record CardStatement(DateOnly ClosingDate, decimal Charges, decimal Interest, decimal Balance, decimal MinimumPayment);
@@ -40,7 +44,7 @@ public class CardSimulation
 }
 
 /// <summary>
-/// Credit cards as revolving balances: bills charged to a card and its typical spending build up a statement,
+/// Credit cards as revolving balances: bills and transactions charged to a card and its typical spending build up a statement,
 /// and bills that pay the card cover the statement in full, the minimum, or a fixed amount. Interest is added
 /// at a statement's close when the previous statement wasn't paid in full (an estimate of how issuers charge it).
 /// </summary>
@@ -88,8 +92,11 @@ public static class CreditCards
     /// <summary>
     /// Plays a card forward from its balance date through <paramref name="through"/>: charges, typical spending,
     /// statements with interest, and payments worked out by each paying bill's rule (unless an amount was recorded).
+    /// Transactions logged on the card count toward its typical spending for their cycle, so each cycle is charged
+    /// the larger of the estimate and what was logged.
     /// </summary>
-    public static CardSimulation Simulate(Account card, IEnumerable<Bill> bills, DateOnly through, ProjectionMode mode = ProjectionMode.Expected)
+    public static CardSimulation Simulate(Account card, IEnumerable<Bill> bills, IEnumerable<Transaction> transactions, DateOnly through,
+        ProjectionMode mode = ProjectionMode.Expected)
     {
         var billList = bills as IReadOnlyCollection<Bill> ?? bills.ToList();
         var asOf = card.BalanceAsOf;
@@ -102,11 +109,13 @@ public static class CreditCards
         CardStatement? lastStatement = null;
         var paidSinceClose = 0m;
         var chargesSinceClose = 0m;
+        var loggedSinceClose = 0m;
 
-        void Add(DateOnly date, CardEntryKind kind, string description, decimal amount, Bill? bill = null, DateOnly? due = null, bool estimate = false)
+        void Add(DateOnly date, CardEntryKind kind, string description, decimal amount, Bill? bill = null, DateOnly? due = null, bool estimate = false,
+            Transaction? transaction = null)
         {
             owed += amount;
-            entries.Add(new CardEntry(date, kind, description, amount, owed, bill, due, estimate));
+            entries.Add(new CardEntry(date, kind, description, amount, owed, bill, due, estimate, transaction));
         }
 
         // Due dates are looked up from a little before the balance date, so late payments made after it still count.
@@ -125,6 +134,17 @@ public static class CreditCards
             {
                 chargesSinceClose += amount;
                 Add(date, CardEntryKind.Charge, bill.Name, amount, bill, due, estimate);
+            }));
+        }
+
+        foreach (var transaction in transactions.Where(t => t.AccountId == card.Id && t.Date >= asOf && t.Date <= through))
+        {
+            var amount = -transaction.SignedAmount;
+            events.Add((transaction.Date, 0, () =>
+            {
+                chargesSinceClose += amount;
+                loggedSinceClose += amount;
+                Add(transaction.Date, CardEntryKind.Charge, transaction.Description, amount, transaction: transaction);
             }));
         }
 
@@ -150,9 +170,13 @@ public static class CreditCards
                 var previousClose = ClosingDates(statementDay, close.AddMonths(-1).AddDays(-3), close.AddDays(-1)).LastOrDefault(close.AddMonths(-1));
                 var cycleDays = close.DayNumber - previousClose.DayNumber;
                 var remainingDays = close.DayNumber - Math.Max(previousClose.DayNumber, asOf.DayNumber);
-                var amount = Math.Round(spending * remainingDays / Math.Max(1, cycleDays), 2);
+                var estimate = Math.Round(spending * remainingDays / Math.Max(1, cycleDays), 2);
                 events.Add((close, 2, () =>
                 {
+                    // Spending already logged as transactions this cycle is part of the estimate, not on top of it.
+                    var amount = Math.Max(0m, estimate - loggedSinceClose);
+                    if (amount == 0)
+                        return;
                     chargesSinceClose += amount;
                     Add(close, CardEntryKind.Spending, "Everyday spending (estimate)", amount, estimate: true);
                 }));
@@ -173,6 +197,7 @@ public static class CreditCards
                 statements.Add(lastStatement);
                 paidSinceClose = 0m;
                 chargesSinceClose = 0m;
+                loggedSinceClose = 0m;
             }));
         }
 
@@ -196,11 +221,11 @@ public static class CreditCards
     }
 
     /// <summary>Estimated amounts for every bill that pays a card, stored on the bills for schedules and dashboards.</summary>
-    public static void EstimatePayments(IReadOnlyCollection<Bill> bills, DateOnly through)
+    public static void EstimatePayments(IReadOnlyCollection<Bill> bills, IReadOnlyCollection<Transaction> transactions, DateOnly through)
     {
         foreach (var group in bills.Where(b => b.CardAccount is not null).GroupBy(b => b.CardAccountId))
         {
-            var simulation = Simulate(group.First().CardAccount!, bills, through);
+            var simulation = Simulate(group.First().CardAccount!, bills, transactions, through);
             foreach (var bill in group)
             {
                 bill.PaymentEstimates = simulation.Payments

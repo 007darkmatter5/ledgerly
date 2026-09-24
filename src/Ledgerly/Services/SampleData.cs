@@ -57,13 +57,15 @@ public static class SampleData
         var entertainment = new Category { Name = "Entertainment", Color = "#E91E63" };
         var insurance = new Category { Name = "Insurance", Color = "#16A085" };
         var debt = new Category { Name = "Debt", Color = "#C0392B" };
+        var dining = new Category { Name = "Dining", Color = "#D35400" };
+        var groceries = new Category { Name = "Groceries", Color = "#7CB342" };
 
         decimal PaymentOf(Loan l) => Amortization.MonthlyPayment(l.OriginalPrincipal, l.AnnualRatePercent, l.TermMonths);
 
         return
         [
             checking, savings, card, mortgage, auto, student,
-            housing, transportation, education, utilities, entertainment, insurance, debt,
+            housing, transportation, education, utilities, entertainment, insurance, debt, dining, groceries,
             firstStreetBank, creditUnion, loanServicer, cityPower, cityWater, fiberNet, mobileCo, streamCo, safeDrive, rewardsCard,
             new Income { Name = "Paycheck", Amount = 2150m, Frequency = Frequency.EveryTwoWeeks, StartDate = NextWeekday(today, DayOfWeek.Friday), DepositToAccount = checking },
             new Transfer { Name = "Emergency fund top-up", Amount = 250m, Frequency = Frequency.Monthly, StartDate = Day(5), FromAccount = checking, ToAccount = savings, IsAutomatic = true },
@@ -77,7 +79,14 @@ public static class SampleData
             new Bill { Name = "Phone", Payee = mobileCo, Category = utilities, ExpectedAmount = 85m, StartDate = Day(18), PayFromAccount = card, AutoPay = true },
             new Bill { Name = "Streaming", Payee = streamCo, Category = entertainment, ExpectedAmount = 15.99m, StartDate = Day(3), PayFromAccount = card, AutoPay = true },
             new Bill { Name = "Car Insurance", Payee = safeDrive, Category = insurance, ExpectedAmount = 540m, Frequency = Frequency.SemiAnnually, StartDate = Day(1).AddMonths(1), PayFromAccount = checking },
-            new Bill { Name = "Rewards Card Payment", Payee = rewardsCard, Category = debt, StartDate = Day(22), PayFromAccount = checking, CardAccount = card, CardPaymentRule = CardPaymentRule.StatementBalance }
+            new Bill { Name = "Rewards Card Payment", Payee = rewardsCard, Category = debt, StartDate = Day(22), PayFromAccount = checking, CardAccount = card, CardPaymentRule = CardPaymentRule.StatementBalance },
+
+            // Earlier ones are already in the balances (dated before today), so they're history; the concert is planned.
+            new Transaction { Description = "Groceries", Category = groceries, Amount = 138.20m, Date = today.AddDays(-6), Account = card },
+            new Transaction { Description = "Dinner out", Category = dining, Amount = 62.40m, Date = today.AddDays(-3), Account = card, Notes = "Birthday dinner" },
+            new Transaction { Description = "Headphones refund", Amount = 49.99m, Direction = TransactionDirection.Received, Date = today.AddDays(-2), Account = card },
+            new Transaction { Description = "Coffee with friends", Category = dining, Amount = 14.75m, Date = today.AddDays(-1), Account = checking },
+            new Transaction { Description = "Concert tickets", Category = entertainment, Amount = 120m, Date = today.AddDays(10), Account = card }
         ];
     }
 

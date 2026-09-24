@@ -239,7 +239,13 @@ public class LedgerService(IDbContextFactory<LedgerlyDbContext> dbFactory, ICurr
             .Include(b => b.Category)
             .Include(b => b.Occurrences)
             .ToListAsync();
-        CreditCards.EstimatePayments(bills, Today.AddYears(1));
+
+        // Card payments depend on what's charged to the card, including logged transactions.
+        var cardIds = bills.Where(b => b.CardAccountId is not null).Select(b => b.CardAccountId!.Value).Distinct().ToList();
+        var cardTransactions = cardIds.Count == 0
+            ? []
+            : await db.Transactions.AsNoTracking().Where(t => t.LedgerId == ledgerId && cardIds.Contains(t.AccountId)).ToListAsync();
+        CreditCards.EstimatePayments(bills, cardTransactions, Today.AddYears(1));
         return bills.OrderBy(b => b.Name).ToList();
     }
 
@@ -461,6 +467,68 @@ public class LedgerService(IDbContextFactory<LedgerlyDbContext> dbFactory, ICurr
         await db.SaveChangesAsync();
     }
 
+    // Transactions
+
+    /// <summary>The ledger's one-off transactions, newest first, optionally limited to dates <paramref name="from"/> through <paramref name="to"/>.</summary>
+    public async Task<List<Transaction>> GetTransactionsAsync(DateOnly? from = null, DateOnly? to = null)
+    {
+        var ledgerId = await LedgerIdAsync();
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var transactions = await db.Transactions.AsNoTracking()
+            .Where(t => t.LedgerId == ledgerId && (from == null || t.Date >= from) && (to == null || t.Date <= to))
+            .Include(t => t.Account)
+            .Include(t => t.Category)
+            .Include(t => t.Payee)
+            .ToListAsync();
+        return transactions.OrderByDescending(t => t.Date).ThenByDescending(t => t.Id).ToList();
+    }
+
+    /// <summary>
+    /// Saves a one-off transaction. Throws <see cref="LedgerValidationException"/> for a blank description,
+    /// no account, or an amount that isn't more than zero.
+    /// </summary>
+    public async Task SaveTransactionAsync(Transaction transaction)
+    {
+        transaction.Description = transaction.Description.Trim();
+        if (transaction.Description.Length == 0)
+            throw new LedgerValidationException("Enter what the transaction was for.");
+        if (transaction.Description.Length > 100)
+            throw new LedgerValidationException("Descriptions can be up to 100 characters.");
+        if (transaction.Amount <= 0)
+            throw new LedgerValidationException("Enter an amount more than zero.");
+        if (transaction.AccountId == 0)
+            throw new LedgerValidationException("Choose an account.");
+        transaction.Notes = string.IsNullOrWhiteSpace(transaction.Notes) ? null : transaction.Notes.Trim();
+
+        var ledgerId = await LedgerIdAsync();
+        await using (var db = await dbFactory.CreateDbContextAsync())
+        {
+            await EnsureInLedgerAsync(db.Accounts, transaction.AccountId, ledgerId);
+            await EnsureInLedgerAsync(db.Categories, transaction.CategoryId, ledgerId);
+            await EnsureInLedgerAsync(db.Payees, transaction.PayeeId, ledgerId);
+        }
+
+        await SaveAsync(transaction);
+    }
+
+    public Task DeleteTransactionAsync(int id) => DeleteAsync<Transaction>(id);
+
+    /// <summary>The account of the most recently added transaction, to suggest for the next one.</summary>
+    public async Task<int?> GetLastTransactionAccountIdAsync()
+    {
+        var ledgerId = await LedgerIdAsync();
+        await using var db = await dbFactory.CreateDbContextAsync();
+        return await db.Transactions.Where(t => t.LedgerId == ledgerId).OrderByDescending(t => t.Id).Select(t => (int?)t.AccountId).FirstOrDefaultAsync();
+    }
+
+    /// <summary>How many transactions an account has, to warn before deleting it (they're deleted with it).</summary>
+    public async Task<int> CountTransactionsAsync(int accountId)
+    {
+        var ledgerId = await LedgerIdAsync();
+        await using var db = await dbFactory.CreateDbContextAsync();
+        return await db.Transactions.CountAsync(t => t.LedgerId == ledgerId && t.AccountId == accountId);
+    }
+
     // Loans
 
     public async Task<List<Loan>> GetLoansAsync()
@@ -494,7 +562,7 @@ public class LedgerService(IDbContextFactory<LedgerlyDbContext> dbFactory, ICurr
     {
         var ids = accountIds.ToHashSet();
         var accounts = (await GetAccountsAsync()).Where(a => ids.Contains(a.Id)).ToList();
-        return Projection.Build(accounts, await GetBillsAsync(), await GetIncomesAsync(), await GetTransfersAsync(), through, mode);
+        return Projection.Build(accounts, await GetBillsAsync(), await GetIncomesAsync(), await GetTransfersAsync(), await GetTransactionsAsync(), through, mode);
     }
 
     public async Task<bool> HasAnyDataAsync()
@@ -504,6 +572,7 @@ public class LedgerService(IDbContextFactory<LedgerlyDbContext> dbFactory, ICurr
         return await db.Accounts.AnyAsync(a => a.LedgerId == ledgerId)
             || await db.Bills.AnyAsync(b => b.LedgerId == ledgerId)
             || await db.Transfers.AnyAsync(t => t.LedgerId == ledgerId)
+            || await db.Transactions.AnyAsync(t => t.LedgerId == ledgerId)
             || await db.Loans.AnyAsync(l => l.LedgerId == ledgerId);
     }
 

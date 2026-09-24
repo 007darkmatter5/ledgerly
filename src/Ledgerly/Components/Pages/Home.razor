@@ -231,9 +231,10 @@ else
         _loanExtras = _loans.ToDictionary(l => l.Id, l => LoanPayments.ExtrasFor(l, bills, today));
         var incomes = await Ledger.GetIncomesAsync();
         var transfers = await Ledger.GetTransfersAsync();
+        var transactions = await Ledger.GetTransactionsAsync();
 
         _projections = _accounts
-            .Select(a => (a, Projection.Build([a], bills, incomes, transfers, today.AddDays(30))))
+            .Select(a => (a, Projection.Build([a], bills, incomes, transfers, transactions, today.AddDays(30))))
             .ToList();
 
         _upcoming30 = BillSchedule.Between(bills, today, today.AddDays(30)).ToList();

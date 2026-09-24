@@ -1,0 +1,202 @@
+@inject LedgerService Ledger
+@inject IDialogService Dialogs
+@inject ISnackbar Snackbar
+
+<MudDialog>
+    <DialogContent>
+        @if (_accounts.Count == 0)
+        {
+            <MudAlert Severity="Severity.Info" Class="mb-3">Add an account first, so there's somewhere for the money to come from.</MudAlert>
+        }
+        @if (_error is not null)
+        {
+            <MudAlert Severity="Severity.Error" Class="mb-3">@_error</MudAlert>
+        }
+        <MudForm @ref="_form">
+            <MudGrid Spacing="2">
+                <MudItem xs="12" sm="5">
+                    <MudNumericField @ref="_amountField" @bind-Value="_amount" Label="Amount" Required="true" RequiredError="Enter the amount" Format="N2" Min="0m" Adornment="Adornment.Start" AdornmentText="$"
+                                     Variant="Variant.Outlined" Margin="Margin.Dense" AutoFocus="true" HideSpinButtons="true" />
+                </MudItem>
+                <MudItem xs="12" sm="7" Class="d-flex align-center">
+                    <MudToggleGroup T="TransactionDirection" @bind-Value="Model.Direction" Color="Color.Primary" Size="Size.Small" CheckMark="true" Outlined="true">
+                        <MudToggleItem Value="TransactionDirection.Spent" Text="Spent" />
+                        <MudToggleItem Value="TransactionDirection.Received" Text="@(SelectedAccount?.IsCreditCard == true ? "Refund or credit" : "Received")" />
+                    </MudToggleGroup>
+                </MudItem>
+                <MudItem xs="12">
+                    <MudTextField @bind-Value="Model.Description" Label="What was it for?" Placeholder="Dinner out" Required="true" RequiredError="Enter what it was for"
+                                  MaxLength="100" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <MudSelect T="int" @bind-Value="Model.AccountId" Label="@(Model.IsSpent ? "Paid from" : "Into")" Required="true" RequiredError="Choose an account"
+                               Variant="Variant.Outlined" Margin="Margin.Dense" ToStringFunc="@(id => _accounts.FirstOrDefault(a => a.Id == id)?.Name ?? "")">
+                        @foreach (var account in _accounts)
+                        {
+                            <MudSelectItem T="int" Value="account.Id">@account.Name</MudSelectItem>
+                        }
+                    </MudSelect>
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <DateOnlyPicker @bind-Value="_date" Label="Date" Required="true" HelperText="@DateHint" />
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <PayeePicker @bind-Value="Model.PayeeId" />
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center">
+                        <MudSelect T="int?" @bind-Value="Model.CategoryId" Label="Category" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                   ToStringFunc="@(id => _categories.FirstOrDefault(c => c.Id == id)?.Name ?? "None")">
+                            <MudSelectItem T="int?" Value="null">None</MudSelectItem>
+                            @foreach (var category in _categories)
+                            {
+                                <MudSelectItem T="int?" Value="category.Id"><CategoryChip Category="category" /></MudSelectItem>
+                            }
+                        </MudSelect>
+                        <MudTooltip Text="New category">
+                            <MudIconButton Icon="@Icons.Material.Filled.Add" Size="Size.Small" OnClick="AddCategoryAsync" aria-label="New category" />
+                        </MudTooltip>
+                    </MudStack>
+                </MudItem>
+                <MudItem xs="12">
+                    <MudTextField @bind-Value="Model.Notes" Label="Notes" Lines="2" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                </MudItem>
+            </MudGrid>
+        </MudForm>
+    </DialogContent>
+    <DialogActions>
+        @if (Model.Id != 0)
+        {
+            <MudButton Color="Color.Error" OnClick="DeleteAsync" Disabled="_saving" Class="mr-auto">Delete</MudButton>
+        }
+        <MudButton OnClick="Cancel">@(_added > 0 ? "Done" : "Cancel")</MudButton>
+        @if (Model.Id == 0)
+        {
+            <MudButton Color="Color.Primary" Variant="Variant.Outlined" OnClick="() => SaveAsync(addAnother: true)" Disabled="_accounts.Count == 0 || _saving">Save &amp; add another</MudButton>
+        }
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="() => SaveAsync(addAnother: false)" Disabled="_accounts.Count == 0 || _saving">Save</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = null!;
+    [Parameter] public Transaction Model { get; set; } = new();
+
+    private MudForm _form = null!;
+    private MudNumericField<decimal?> _amountField = null!;
+    private decimal? _amount;
+    private List<Account> _accounts = [];
+    private List<Category> _categories = [];
+    private DateOnly? _date;
+    private string? _error;
+    private bool _saving;
+    private int _added;
+
+    /// <summary>
+    /// Opens the dialog to add a transaction (<paramref name="transaction"/> null) or edit a copy of one.
+    /// True when anything was added, changed or deleted.
+    /// </summary>
+    public static async Task<bool> ShowAsync(IDialogService dialogs, Transaction? transaction = null)
+    {
+        var parameters = new DialogParameters<TransactionDialog> { { d => d.Model, transaction?.Copy() ?? new Transaction() } };
+        var dialog = await dialogs.ShowAsync<TransactionDialog>(transaction is null ? "Add transaction" : "Edit transaction", parameters,
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true });
+        return await dialog.Result is { Canceled: false };
+    }
+
+    private Account? SelectedAccount => _accounts.FirstOrDefault(a => a.Id == Model.AccountId);
+
+    /// <summary>A transaction before the account's balance date is already part of that balance.</summary>
+    private string? DateHint =>
+        SelectedAccount is { } account && _date is { } date && date < account.BalanceAsOf
+            ? $"Before this account's balance date ({account.BalanceAsOf:MMM d}), so it's kept for your records only."
+            : null;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _accounts = (await Ledger.GetAccountsAsync())
+            .Where(a => a.IsActive || a.Id == Model.AccountId)
+            .ToList();
+        _categories = await Ledger.GetCategoriesAsync();
+        _date = Model.Id == 0 ? Ledger.Today : Model.Date;
+        _amount = Model.Id == 0 ? null : Model.Amount;
+
+        if (Model.Id == 0 && Model.AccountId == 0 && _accounts.Count > 0)
+        {
+            var last = await Ledger.GetLastTransactionAccountIdAsync();
+            Model.AccountId = (_accounts.FirstOrDefault(a => a.Id == last && a.IsActive)
+                ?? _accounts.FirstOrDefault(a => a.Type == AccountType.Checking)
+                ?? _accounts[0]).Id;
+        }
+    }
+
+    private void Cancel()
+    {
+        if (_added > 0)
+            MudDialog.Close(DialogResult.Ok(_added));
+        else
+            MudDialog.Cancel();
+    }
+
+    private async Task SaveAsync(bool addAnother)
+    {
+        await _form.ValidateAsync();
+        if (!_form.IsValid || _date is null || _amount is null)
+            return;
+
+        Model.Date = _date.Value;
+        Model.Amount = _amount.Value;
+        _saving = true;
+        _error = null;
+        try
+        {
+            await Ledger.SaveTransactionAsync(Model);
+            _added++;
+            if (!addAnother)
+            {
+                MudDialog.Close(DialogResult.Ok(Model.Id));
+                return;
+            }
+
+            // Keep the account, date and direction for the next one; clear the rest.
+            Snackbar.Add($"Added {Model.Description}", Severity.Success);
+            Model = new Transaction { AccountId = Model.AccountId, Direction = Model.Direction };
+            _amount = null;
+            await _form.ResetValidationAsync();
+            await _amountField.FocusAsync();
+        }
+        catch (LedgerValidationException ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private async Task DeleteAsync()
+    {
+        var confirmed = await Dialogs.ShowMessageBoxAsync("Delete transaction?", $"Delete \"{Model.Description}\"?", yesText: "Delete", cancelText: "Cancel");
+        if (confirmed != true)
+            return;
+
+        await Ledger.DeleteTransactionAsync(Model.Id);
+        Snackbar.Add("Transaction deleted", Severity.Info);
+        MudDialog.Close(DialogResult.Ok(Model.Id));
+    }
+
+    private async Task AddCategoryAsync()
+    {
+        var parameters = new DialogParameters<CategoryDialog>
+        {
+            { d => d.Model, new Category { Color = CategoryChip.Palette[_categories.Count % CategoryChip.Palette.Length] } }
+        };
+        var dialog = await Dialogs.ShowAsync<CategoryDialog>("New category", parameters, new DialogOptions { MaxWidth = MaxWidth.ExtraSmall, FullWidth = true });
+        if (await dialog.Result is { Canceled: false, Data: int id })
+        {
+            _categories = await Ledger.GetCategoriesAsync();
+            Model.CategoryId = id;
+        }
+    }
+}

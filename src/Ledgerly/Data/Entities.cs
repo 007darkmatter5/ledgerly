@@ -334,6 +334,49 @@ public class TransferOccurrence
     public bool IsDone => CompletedOn is not null;
 }
 
+public enum TransactionDirection
+{
+    /// <summary>Money leaving the account (or charged to a credit card).</summary>
+    Spent,
+
+    /// <summary>Money arriving in the account (or a refund or credit on a credit card).</summary>
+    Received
+}
+
+/// <summary>
+/// A single purchase or deposit that isn't part of a bill or income, like dinner out or a refund.
+/// Usually already happened, but can be dated ahead for a planned one-off.
+/// </summary>
+public class Transaction : ILedgerEntity
+{
+    public Transaction Copy() => (Transaction)MemberwiseClone();
+
+    public int Id { get; set; }
+    public int LedgerId { get; set; }
+    public DateOnly Date { get; set; }
+    public string Description { get; set; } = "";
+
+    /// <summary>Always positive; <see cref="Direction"/> says which way the money went.</summary>
+    public decimal Amount { get; set; }
+
+    public TransactionDirection Direction { get; set; }
+
+    public int AccountId { get; set; }
+    public Account? Account { get; set; }
+
+    public int? PayeeId { get; set; }
+    public Payee? Payee { get; set; }
+    public int? CategoryId { get; set; }
+    public Category? Category { get; set; }
+
+    public string? Notes { get; set; }
+
+    public bool IsSpent => Direction == TransactionDirection.Spent;
+
+    /// <summary>The change in the account's balance: negative when spent.</summary>
+    public decimal SignedAmount => IsSpent ? -Amount : Amount;
+}
+
 /// <summary>An amortizing loan with monthly payments.</summary>
 public class Loan : ILedgerEntity
 {

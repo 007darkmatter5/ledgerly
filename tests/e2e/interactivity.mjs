@@ -100,6 +100,30 @@ try {
   note(`transfer added and listed with both accounts: ${transferListed}`);
   if (!transferListed) { note(`FAIL: new transfer did not appear: ${transferEnds || await page.locator('.mud-dialog').allInnerTexts()}`); failed = true; }
 
+  // Transactions: quick-add one from the app bar (account and date default to the last-used/checking account and today),
+  // then see it on the Transactions page and in the Payments history.
+  await page.goto(`${base}/transactions`);
+  let quickAddOpened = false;
+  for (let attempt = 0; attempt < 10 && !quickAddOpened; attempt++) {
+    await page.click('button[aria-label="Add a transaction"]');
+    quickAddOpened = await page.waitForSelector('.mud-dialog input', { timeout: 3000 }).then(() => true, () => false);
+  }
+  if (!quickAddOpened) throw new Error('the app bar button did not open the transaction dialog');
+  const transactionDialog = page.locator('.mud-dialog');
+  await transactionDialog.getByLabel('Amount').fill('62.40');
+  await transactionDialog.getByLabel('What was it for?').fill('E2E Dinner out');
+  await page.click('.mud-dialog button:text-is("Save")');
+  const transactionRow = await page.waitForSelector('.mud-table-body tr:has-text("E2E Dinner out")', { timeout: 5000 }).then((h) => h, () => null);
+  const transactionText = transactionRow === null ? '' : await transactionRow.innerText();
+  const transactionListed = transactionText.includes('62.40') && transactionText.includes('E2E Checking');
+  note(`transaction quick-added and listed: ${transactionListed}`);
+  if (!transactionListed) { note(`FAIL: new transaction did not appear: ${transactionText || await page.locator('.mud-dialog').allInnerTexts()}`); failed = true; }
+
+  await page.goto(`${base}/payments`);
+  const inPayments = await page.waitForSelector('.mud-table-body tr:has-text("E2E Dinner out")', { timeout: 10000 }).then(() => true, () => false);
+  note(`transaction shown in payment history: ${inPayments}`);
+  if (!inPayments) { note('FAIL: the transaction is missing from the Payments history'); failed = true; }
+
   // Backup & restore: download a backup, add a category afterwards, restore, and check the data is back to the backup's.
   const download = await page.request.get(`${base}/Account/Manage/Admin/Backup/Download`);
   note(`backup download: ${download.status()} ${download.headers()['content-type']}`);

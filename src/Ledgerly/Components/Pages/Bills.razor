@@ -147,7 +147,7 @@
         @MonthHeader(showIncomeToggle: true)
         <div class="px-2 pb-2">
             <BillCalendar Month="_month" Bills="FilteredBills" Incomes="@(_showIncome ? FilteredIncomes : null)"
-                          Transfers="@(_showTransfers ? FilteredTransfers : null)" OnChanged="LoadAsync" />
+                          Transfers="@(_showTransfers ? FilteredTransfers : null)" Transactions="@(_showTransactions ? FilteredTransactions : null)" OnChanged="LoadAsync" />
         </div>
     </MudTabPanel>
 
@@ -185,6 +185,8 @@
     private bool _showIncome = true;
     private List<Transfer> _transfers = [];
     private bool _showTransfers = true;
+    private List<Transaction> _transactions = [];
+    private bool _showTransactions = true;
     private DateOnly _month;
 
     private readonly Func<Bill, object> _byName = b => b.Name;
@@ -219,6 +221,16 @@
             ? null
             : _transfers.Where(t => _accountFilter is null || t.FromAccountId == _accountFilter || t.ToAccountId == _accountFilter);
 
+    /// <summary>Transactions for the calendar. They have an account, category and payee like bills, so every filter applies.</summary>
+    private IEnumerable<Transaction> FilteredTransactions => _transactions.Where(t =>
+        (_accountFilter is null || t.AccountId == _accountFilter)
+        && (CategoryFilter is null || (t.CategoryId ?? 0) == CategoryFilter)
+        && (PayeeFilter is null || (t.PayeeId ?? 0) == PayeeFilter)
+        && (string.IsNullOrWhiteSpace(_search)
+            || t.Description.Contains(_search, StringComparison.OrdinalIgnoreCase)
+            || (t.Payee?.Name.Contains(_search, StringComparison.OrdinalIgnoreCase) ?? false)
+            || (t.Category?.Name.Contains(_search, StringComparison.OrdinalIgnoreCase) ?? false)));
+
     /// <summary>Month navigation and totals, shared by the Calendar and Schedule tabs.</summary>
     private RenderFragment MonthHeader(bool showIncomeToggle) => @<MudStack Row="true" AlignItems="AlignItems.Center" Class="px-2 py-2" Wrap="Wrap.Wrap">
         <MudIconButton Icon="@Icons.Material.Filled.ChevronLeft" OnClick="() => _month = _month.AddMonths(-1)" aria-label="Previous month" />
@@ -229,6 +241,7 @@
         {
             <MudSwitch @bind-Value="_showIncome" Label="Show income" Color="Color.Success" Class="ml-2" />
             <MudSwitch @bind-Value="_showTransfers" Label="Show transfers" Color="Color.Secondary" />
+            <MudSwitch @bind-Value="_showTransactions" Label="Show transactions" Color="Color.Tertiary" />
         }
         <MudSpacer />
         <MudStack Row="true" Spacing="4">
@@ -266,6 +279,7 @@
         _payees = await Ledger.GetPayeesAsync();
         _incomes = await Ledger.GetIncomesAsync();
         _transfers = await Ledger.GetTransfersAsync();
+        _transactions = await Ledger.GetTransactionsAsync();
         _loading = false;
     }
 

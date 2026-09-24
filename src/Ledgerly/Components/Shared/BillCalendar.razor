@@ -14,6 +14,7 @@
         var dues = DuesOn(day);
         var incomes = IncomesOn(day);
         var moves = TransfersOn(day);
+        var logged = TransactionsOn(day);
         <div class="@DayClass(day)" role="gridcell">
             <div class="cal-day-head">
                 <span class="cal-date" aria-label="@day.ToString("D")">@day.Day</span>
@@ -36,6 +37,10 @@
             {
                 @DueButton(due)
             }
+            @foreach (var transaction in logged)
+            {
+                @TransactionButton(transaction)
+            }
         </div>
     }
 </div>
@@ -50,7 +55,8 @@
         var dues = DuesOn(day);
         var incomes = IncomesOn(day);
         var moves = TransfersOn(day);
-        if (dues.Count == 0 && incomes.Count == 0 && moves.Count == 0)
+        var logged = TransactionsOn(day);
+        if (dues.Count == 0 && incomes.Count == 0 && moves.Count == 0 && logged.Count == 0)
             continue;
         anything = true;
         <div class="@($"cal-agenda-day{(day == Ledger.Today ? " today" : "")}")">
@@ -69,6 +75,10 @@
             @foreach (var due in dues)
             {
                 @DueButton(due, "C")
+            }
+            @foreach (var transaction in logged)
+            {
+                @TransactionButton(transaction, "C")
             }
         </div>
     }
@@ -91,9 +101,13 @@
     {
         <span class="cal-item transfer">Transfer</span>
     }
+    @if (Transactions is not null)
+    {
+        <span class="cal-item transaction">Transaction</span>
+    }
     <MudText Typo="Typo.caption" Class="mud-text-secondary">
         Click a bill to record the amount or mark it paid@(Transfers is null ? "." : ", or a transfer to record that the money moved.")
-        @(Transfers is null ? "" : "Day totals count bills only.")
+        @(Transfers is null && Transactions is null ? "" : "Day totals count bills only.")
     </MudText>
 </div>
 
@@ -109,6 +123,9 @@
     /// <summary>Transfers to show alongside bills, or null to leave them out.</summary>
     [Parameter] public IEnumerable<Transfer>? Transfers { get; set; }
 
+    /// <summary>One-off transactions to show alongside bills, or null to leave them out.</summary>
+    [Parameter] public IEnumerable<Transaction>? Transactions { get; set; }
+
     [Parameter] public EventCallback OnChanged { get; set; }
 
     private DateOnly _gridStart;
@@ -116,6 +133,7 @@
     private ILookup<DateOnly, BillDue> _dues = Enumerable.Empty<BillDue>().ToLookup(d => d.DueDate);
     private ILookup<DateOnly, Income> _incomes = Enumerable.Empty<Income>().ToLookup(i => i.StartDate);
     private ILookup<DateOnly, TransferDue> _moves = Enumerable.Empty<TransferDue>().ToLookup(d => d.ScheduledDate);
+    private ILookup<DateOnly, Transaction> _logged = Enumerable.Empty<Transaction>().ToLookup(t => t.Date);
 
     private static IEnumerable<DayOfWeek> Weekdays
     {
@@ -140,6 +158,7 @@
             .SelectMany(i => Recurrence.Dates(i.Frequency, i.StartDate, i.EndDate, _gridStart, _gridEnd).Select(date => (date, i)))
             .ToLookup(x => x.date, x => x.i);
         _moves = TransferSchedule.Between(Transfers ?? [], _gridStart, _gridEnd).ToLookup(d => d.ScheduledDate);
+        _logged = (Transactions ?? []).Where(t => t.Date >= _gridStart && t.Date <= _gridEnd).ToLookup(t => t.Date);
     }
 
     private List<BillDue> DuesOn(DateOnly day) => _dues[day].ToList();
@@ -147,6 +166,26 @@
     private List<Income> IncomesOn(DateOnly day) => _incomes[day].OrderBy(i => i.Name).ToList();
 
     private List<TransferDue> TransfersOn(DateOnly day) => _moves[day].ToList();
+
+    private List<Transaction> TransactionsOn(DateOnly day) => _logged[day].OrderBy(t => t.Description).ToList();
+
+    private static string Describe(Transaction transaction) =>
+        $"{transaction.Description}: {(transaction.IsSpent ? "" : "+")}{transaction.Amount:C} {(transaction.IsSpent ? "from" : "into")} {transaction.Account?.Name}";
+
+    private RenderFragment TransactionButton(Transaction transaction, string format = "C0") => @<button type="button" class="@($"cal-item transaction{(transaction.IsSpent ? "" : " received")}")" title="@Describe(transaction)" aria-label="@Describe(transaction)" @onclick="() => OpenAsync(transaction)">
+        @if (transaction.Category?.Color is { } color)
+        {
+            <span class="category-dot" style="@($"background:{color}")"></span>
+        }
+        <span class="cal-name">@transaction.Description</span>
+        <span class="cal-amount">@(transaction.IsSpent ? "" : "+")@transaction.Amount.ToString(format)</span>
+    </button>;
+
+    private async Task OpenAsync(Transaction transaction)
+    {
+        if (await TransactionDialog.ShowAsync(Dialogs, transaction))
+            await OnChanged.InvokeAsync();
+    }
 
     private string DayClass(DateOnly day) =>
         "cal-day" + (day.Month != Month.Month ? " outside" : "") + (day == Ledger.Today ? " today" : "");

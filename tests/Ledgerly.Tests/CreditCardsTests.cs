@@ -31,7 +31,7 @@ public class CreditCardsTests
         var phone = Charge("Phone", 85m, D(9, 18));
         var payment = Payment(card, CardPaymentRule.StatementBalance, D(10, 20));
 
-        var simulation = CreditCards.Simulate(card, [phone, payment], D(11, 30));
+        var simulation = CreditCards.Simulate(card, [phone, payment], [], D(11, 30));
 
         // Sep 25 statement: 500 + Sep 18 phone. Oct 25 statement: the Oct 18 phone only, since Sep was paid in full.
         Assert.Equal([585m, 85m, 85m], simulation.Statements.Select(s => s.Balance));
@@ -47,7 +47,7 @@ public class CreditCardsTests
         var card = Card(owed: 2000m, apr: 24m);
         var payment = Payment(card, CardPaymentRule.Minimum, D(10, 20));
 
-        var simulation = CreditCards.Simulate(card, [payment], D(10, 31));
+        var simulation = CreditCards.Simulate(card, [payment], [], D(10, 31));
 
         // First close: not paying in full, so 2% a month on 2,000 = 40 interest; minimum = 1% of 2,040 + 40 = 60.40.
         var first = simulation.Statements[0];
@@ -65,7 +65,7 @@ public class CreditCardsTests
         var payment = Payment(card, CardPaymentRule.FixedAmount, D(9, 20), amount: 100m);
         payment.Occurrences = [new BillOccurrence { DueDate = D(9, 20), Amount = 120m, PaidOn = D(9, 19) }];
 
-        var simulation = CreditCards.Simulate(card, [payment], D(10, 31));
+        var simulation = CreditCards.Simulate(card, [payment], [], D(10, 31));
 
         Assert.Equal(120m, simulation.PaymentFor(payment, D(9, 20)));
         Assert.Equal(30m, simulation.PaymentFor(payment, D(10, 20)));
@@ -78,10 +78,82 @@ public class CreditCardsTests
     {
         var card = Card(owed: 0m, statementDay: 15, spending: 310m);
 
-        var simulation = CreditCards.Simulate(card, [], D(10, 31));
+        var simulation = CreditCards.Simulate(card, [], [], D(10, 31));
 
         // Aug 15 → Sep 15 is 31 days, 14 of them after the Sep 1 balance date.
         Assert.Equal([140m, 310m], simulation.Entries.Where(e => e.Kind == CardEntryKind.Spending).Select(e => e.Amount));
+    }
+
+    private static Transaction Logged(string description, decimal amount, DateOnly date, TransactionDirection direction = TransactionDirection.Spent) =>
+        new() { Description = description, Amount = amount, Date = date, AccountId = 2, Direction = direction };
+
+    [Fact]
+    public void Logged_transactions_are_charged_on_their_date()
+    {
+        var card = Card(owed: 0m, apr: null);
+        var dinner = Logged("Dinner out", 62.40m, D(9, 12));
+
+        var simulation = CreditCards.Simulate(card, [], [dinner, new Transaction { Description = "On another card", Amount = 10m, Date = D(9, 12), AccountId = 9 }], D(9, 30));
+
+        var charge = simulation.Entries.First(e => e.Kind == CardEntryKind.Charge);
+        Assert.Equal((D(9, 12), 62.40m), (charge.Date, charge.Amount));
+        Assert.Same(dinner, charge.Transaction);
+        Assert.Equal(62.40m, simulation.Statements[0].Charges);
+    }
+
+    [Fact]
+    public void Logged_spending_counts_toward_the_everyday_estimate_for_its_cycle()
+    {
+        // Statement closes on the 15th; a full cycle's estimate is 500.
+        var card = Card(owed: 0m, statementDay: 15, apr: null, spending: 500m);
+
+        var simulation = CreditCards.Simulate(card, [],
+        [
+            // Sep 15 – Oct 15 cycle: 200 logged, so the estimate adds the other 300.
+            Logged("Groceries", 150m, D(9, 20)),
+            Logged("Dinner out", 50m, D(10, 15)),
+            // Oct 15 – Nov 15 cycle: 700 logged, more than the estimate, so no estimate is added.
+            Logged("New laptop", 700m, D(10, 16))
+        ], D(11, 15));
+
+        var spending = simulation.Entries.Where(e => e.Kind == CardEntryKind.Spending).ToDictionary(e => e.Date, e => e.Amount);
+        Assert.Equal(300m, spending[D(10, 15)]);
+        Assert.False(spending.ContainsKey(D(11, 15)));
+        Assert.Equal([500m, 700m], simulation.Statements.Skip(1).Select(s => s.Charges));
+    }
+
+    [Fact]
+    public void Logged_spending_counts_against_the_prorated_first_cycle()
+    {
+        // Aug 15 → Sep 15 is 31 days, 14 of them after the Sep 1 balance date: 140 of 310.
+        var card = Card(owed: 0m, statementDay: 15, spending: 310m);
+
+        var simulation = CreditCards.Simulate(card, [], [Logged("Dinner out", 100m, D(9, 5)), Logged("Before the balance date", 500m, D(8, 20))], D(9, 30));
+
+        Assert.Equal(40m, simulation.Entries.Single(e => e.Kind == CardEntryKind.Spending).Amount);
+    }
+
+    [Fact]
+    public void A_refund_lowers_what_is_owed_and_the_payment_that_covers_it()
+    {
+        var card = Card(owed: 500m, apr: null);
+        var payment = Payment(card, CardPaymentRule.StatementBalance, D(10, 20));
+
+        var simulation = CreditCards.Simulate(card, [payment], [Logged("Returned boots", 120m, D(9, 10), TransactionDirection.Received)], D(10, 31));
+
+        Assert.Equal(380m, simulation.Statements[0].Balance);
+        Assert.Equal(380m, simulation.PaymentFor(payment, D(10, 20)));
+    }
+
+    [Fact]
+    public void Card_payment_estimates_follow_logged_transactions()
+    {
+        var card = Card(owed: 0m, apr: null);
+        var payment = Payment(card, CardPaymentRule.StatementBalance, D(10, 20));
+
+        CreditCards.EstimatePayments([payment], [Logged("Dinner out", 62.40m, D(9, 12))], D(12, 31));
+
+        Assert.Equal(62.40m, payment.PaymentEstimates![D(10, 20)]);
     }
 
     [Fact]
@@ -98,9 +170,9 @@ public class CreditCardsTests
         var payment = Payment(card, CardPaymentRule.StatementBalance, D(9, 20));
         Bill[] bills = [Charge("Phone", 85m, D(9, 18)), payment];
 
-        var checkingOnly = Projection.Build([Checking], bills, [], [], D(9, 30));
-        var both = Projection.Build([Checking, card], bills, [], [], D(9, 30));
-        var cardOnly = Projection.Build([card], bills, [], [], D(9, 30));
+        var checkingOnly = Projection.Build([Checking], bills, [], [], [], D(9, 30));
+        var both = Projection.Build([Checking, card], bills, [], [], [], D(9, 30));
+        var cardOnly = Projection.Build([card], bills, [], [], [], D(9, 30));
 
         // Before the first projected statement, paying in full pays the balance as of the balance date; later charges go on the next statement.
         var paid = Assert.Single(checkingOnly.Entries);
@@ -124,7 +196,7 @@ public class CreditCardsTests
         var payment = Payment(card, CardPaymentRule.StatementBalance, D(10, 20));
         Bill[] bills = [Charge("Phone", 85m, D(9, 18)), payment];
 
-        CreditCards.EstimatePayments(bills, D(12, 31));
+        CreditCards.EstimatePayments(bills, [], D(12, 31));
         var due = BillSchedule.Between(bills, D(10, 1), D(10, 31)).Single(d => d.Bill == payment);
 
         Assert.Equal(585m, due.Amount);

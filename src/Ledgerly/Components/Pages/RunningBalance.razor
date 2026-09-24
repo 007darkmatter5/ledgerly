@@ -1,11 +1,12 @@
 @page "/projection"
 @inject LedgerService Ledger
+@inject IDialogService Dialogs
 
 <PageTitle>Running Balance · Ledgerly</PageTitle>
 
 <MudText Typo="Typo.h4">Running balance</MudText>
 <MudText Typo="Typo.body2" Class="mud-text-secondary mb-4">
-    Where your balance is headed as bills come out and income comes in. Starts from each account's balance as of its as-of date.
+    Where your balance is headed as bills and spending come out and income comes in. Starts from each account's balance as of its as-of date.
 </MudText>
 
 @if (_loading)
@@ -125,7 +126,13 @@ else if (belowThreshold is not null)
                     <MudIcon Icon="@(context.IsTransfer ? Icons.Material.Filled.SwapHoriz : context.IsMoneyIn ? Icons.Material.Filled.ArrowDownward : Icons.Material.Filled.ArrowUpward)"
                              Color="@(context.IsMoneyIn && !context.IsTransfer ? Color.Success : Color.Default)" Size="Size.Small" />
                     <span>@context.Description</span>
-                    @if (context.IsPaid)
+                    @if (context.Transaction is { } transaction)
+                    {
+                        <MudTooltip Text="A one-off transaction. Click to edit it.">
+                            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" OnClick="() => EditTransactionAsync(transaction)">Transaction</MudChip>
+                        </MudTooltip>
+                    }
+                    else if (context.IsPaid)
                     {
                         <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Outlined">@(IsTransferEntry(context) ? "Moved" : "Paid")</MudChip>
                     }
@@ -147,7 +154,7 @@ else if (belowThreshold is not null)
             <MudTd DataLabel="Balance" Style="text-align:right"><strong><Money Value="context.RunningBalance" /></strong></MudTd>
         </RowTemplate>
         <NoRecordsContent>
-            <MudText Class="py-6 mud-text-secondary">No bills, income or transfers in this period.</MudText>
+            <MudText Class="py-6 mud-text-secondary">No bills, income, transfers or transactions in this period.</MudText>
         </NoRecordsContent>
     </MudTable>
 </MudPaper>
@@ -165,6 +172,7 @@ else if (belowThreshold is not null)
     private List<Bill> _bills = [];
     private List<Income> _incomes = [];
     private List<Transfer> _transfers = [];
+    private List<Transaction> _transactions = [];
     private IReadOnlyCollection<int> _selected = [];
     private int _days = 60;
     private ProjectionMode _mode = ProjectionMode.Expected;
@@ -191,6 +199,7 @@ else if (belowThreshold is not null)
         _bills = await Ledger.GetBillsAsync();
         _incomes = await Ledger.GetIncomesAsync();
         _transfers = await Ledger.GetTransfersAsync();
+        _transactions = await Ledger.GetTransactionsAsync();
         _unassignedBills = _bills.Count(b => b.IsActive && b.PayFromAccountId is null);
 
         var ledger = await Ledger.GetActiveLedgerAsync();
@@ -235,6 +244,15 @@ else if (belowThreshold is not null)
         return RecalculateAndRememberAsync();
     }
 
+    private async Task EditTransactionAsync(Transaction transaction)
+    {
+        if (!await TransactionDialog.ShowAsync(Dialogs, transaction))
+            return;
+        _transactions = await Ledger.GetTransactionsAsync();
+        _bills = await Ledger.GetBillsAsync(); // card payment estimates follow card transactions
+        Recalculate();
+    }
+
     private Task RecalculateAndRememberAsync()
     {
         Recalculate();
@@ -250,7 +268,7 @@ else if (belowThreshold is not null)
             return;
         }
 
-        _result = Projection.Build(accounts, _bills, _incomes, _transfers, Ledger.Today.AddDays(_days), _mode);
+        _result = Projection.Build(accounts, _bills, _incomes, _transfers, _transactions, Ledger.Today.AddDays(_days), _mode);
         BuildChart(_result);
     }
 

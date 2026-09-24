@@ -199,6 +199,8 @@ button.cal-item:focus-visible { outline: 2px solid var(--mud-palette-primary); o
 .cal-item.transfer { background: transparent; border: 1px dashed rgb(from var(--mud-palette-secondary) r g b / 0.7); color: var(--mud-palette-secondary); }
 .cal-item.transfer.done { background: rgb(from var(--mud-palette-secondary) r g b / 0.14); border-style: solid; }
 .cal-item.transfer.missed { border-color: var(--mud-palette-warning); color: var(--mud-palette-warning); }
+.cal-item.transaction { background: rgb(from var(--mud-palette-tertiary) r g b / 0.12); border: 1px dotted rgb(from var(--mud-palette-tertiary) r g b / 0.8); }
+.cal-item.transaction.received { color: var(--mud-palette-success); }
 
 .cal-agenda { display: none; }
 

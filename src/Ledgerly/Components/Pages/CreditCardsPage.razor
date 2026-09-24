@@ -109,11 +109,12 @@
     {
         var today = Ledger.Today;
         var bills = await Ledger.GetBillsAsync();
+        var transactions = await Ledger.GetTransactionsAsync();
         _cards = (await Ledger.GetAccountsAsync())
             .Where(a => a.IsCreditCard)
             .Select(card =>
             {
-                var simulation = CreditCards.Simulate(card, bills, today.AddMonths(3));
+                var simulation = CreditCards.Simulate(card, bills, transactions, today.AddMonths(3));
                 var payments = simulation.Entries.Where(e => e.Kind == CardEntryKind.Payment && e.Date >= today).ToList();
                 return new CardSummary(card, simulation.OwedOn(today), payments.FirstOrDefault(), payments.Where(p => p.Date <= today.AddDays(30)).ToList());
             })

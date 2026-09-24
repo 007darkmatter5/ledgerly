@@ -14,6 +14,7 @@ public class LedgerlyDbContext(DbContextOptions<LedgerlyDbContext> options) : Id
     public DbSet<Income> Incomes => Set<Income>();
     public DbSet<Transfer> Transfers => Set<Transfer>();
     public DbSet<TransferOccurrence> TransferOccurrences => Set<TransferOccurrence>();
+    public DbSet<Transaction> Transactions => Set<Transaction>();
     public DbSet<Loan> Loans => Set<Loan>();
     public DbSet<AppSetting> AppSettings => Set<AppSetting>();
 
@@ -106,6 +107,19 @@ public class LedgerlyDbContext(DbContextOptions<LedgerlyDbContext> options) : Id
         modelBuilder.Entity<TransferOccurrence>(e =>
         {
             e.HasIndex(o => new { o.TransferId, o.ScheduledDate }).IsUnique();
+        });
+
+        modelBuilder.Entity<Transaction>(e =>
+        {
+            e.Property(t => t.Description).HasMaxLength(100);
+            e.Property(t => t.Notes).HasMaxLength(1000);
+            e.Property(t => t.Direction).HasConversion<string>().HasMaxLength(20);
+            e.HasIndex(t => new { t.LedgerId, t.Date });
+            e.HasOne<Ledger>().WithMany().HasForeignKey(t => t.LedgerId).OnDelete(DeleteBehavior.Cascade);
+            // Like income, a transaction means nothing without its account.
+            e.HasOne(t => t.Account).WithMany().HasForeignKey(t => t.AccountId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(t => t.Category).WithMany().HasForeignKey(t => t.CategoryId).OnDelete(DeleteBehavior.SetNull);
+            e.HasOne(t => t.Payee).WithMany().HasForeignKey(t => t.PayeeId).OnDelete(DeleteBehavior.SetNull);
         });
 
         modelBuilder.Entity<Loan>(e =>

@@ -29,7 +29,13 @@ public enum ProjectionEntryKind
     TransferOut,
 
     /// <summary>Money arriving in an account from another account.</summary>
-    TransferIn
+    TransferIn,
+
+    /// <summary>A one-off purchase logged as a transaction.</summary>
+    Spent,
+
+    /// <summary>A one-off deposit or refund logged as a transaction.</summary>
+    Received
 }
 
 /// <param name="IsTransfer">
@@ -49,9 +55,11 @@ public record ProjectionEntry(
     bool IsPaid = false,
     bool IsEstimate = false,
     bool IsTransfer = false,
-    int? TransferId = null)
+    int? TransferId = null,
+    Transaction? Transaction = null)
 {
-    public bool IsMoneyIn => Kind is ProjectionEntryKind.Income or ProjectionEntryKind.CardPayment or ProjectionEntryKind.TransferIn;
+    public bool IsMoneyIn => Kind is ProjectionEntryKind.Income or ProjectionEntryKind.CardPayment or ProjectionEntryKind.TransferIn
+        or ProjectionEntryKind.Received;
 }
 
 public class ProjectionResult
@@ -90,17 +98,20 @@ public static class Projection
     /// dated on or after that day is applied. Paid bills use the date they were paid. Credit card payments are
     /// worked out from the card (<see cref="CreditCards.Simulate"/>), and a projected card also gets its
     /// typical spending, interest and incoming payments. A transfer adds an entry to whichever of its two
-    /// accounts is projected; when both are, neither leg counts as money in or out.
+    /// accounts is projected; when both are, neither leg counts as money in or out. One-off transactions
+    /// apply to their account on their date, including a projected card's.
     /// </summary>
     public static ProjectionResult Build(
         IReadOnlyCollection<Account> accounts,
         IEnumerable<Bill> bills,
         IEnumerable<Income> incomes,
         IEnumerable<Transfer> transfers,
+        IEnumerable<Transaction> transactions,
         DateOnly through,
         ProjectionMode mode = ProjectionMode.Expected)
     {
         var billList = bills as IReadOnlyCollection<Bill> ?? bills.ToList();
+        var transactionList = transactions as IReadOnlyCollection<Transaction> ?? transactions.ToList();
         var byId = accounts.ToDictionary(a => a.Id);
         var items = new List<ProjectionEntry>();
 
@@ -110,7 +121,7 @@ public static class Projection
             if (!simulations.TryGetValue(cardId, out var simulation))
             {
                 var card = byId.GetValueOrDefault(cardId) ?? fallback;
-                simulations[cardId] = simulation = card is null ? null : CreditCards.Simulate(card, billList, through, mode);
+                simulations[cardId] = simulation = card is null ? null : CreditCards.Simulate(card, billList, transactionList, through, mode);
             }
             return simulation;
         }
@@ -144,7 +155,16 @@ public static class Projection
             }
         }
 
-        // Charges to a projected card come from the bills above; its spending, interest and payments come from the card.
+        foreach (var transaction in transactionList)
+        {
+            if (!byId.TryGetValue(transaction.AccountId, out var account) || transaction.Date < account.BalanceAsOf || transaction.Date > through)
+                continue;
+
+            items.Add(new ProjectionEntry(transaction.Date, transaction.IsSpent ? ProjectionEntryKind.Spent : ProjectionEntryKind.Received,
+                transaction.Description, account.Id, account.Name, transaction.SignedAmount, 0m, Transaction: transaction));
+        }
+
+        // Charges to a projected card come from the bills and transactions above; its spending, interest and payments come from the card.
         foreach (var card in accounts.Where(a => a.IsCreditCard))
         {
             foreach (var entry in SimulationFor(card.Id, null)!.Entries.Where(e => e.Kind != CardEntryKind.Charge))

@@ -401,6 +401,124 @@ public sealed class LedgerServiceTests : IAsyncLifetime
         Assert.Empty(await alice.GetTransfersAsync());
     }
 
+    private static Transaction NewTransaction(string description, int accountId, decimal amount = 42.50m) =>
+        new() { Description = description, Amount = amount, Date = new DateOnly(2026, 9, 5), AccountId = accountId };
+
+    [Fact]
+    public async Task Transactions_are_private_and_validated()
+    {
+        var alice = ServiceFor("alice");
+        var checking = Checking("Alice checking");
+        var card = new Account { Name = "Alice card", Type = AccountType.CreditCard, Balance = -50m, BalanceAsOf = new DateOnly(2026, 9, 1) };
+        await alice.SaveAccountAsync(checking);
+        await alice.SaveAccountAsync(card);
+
+        var dinner = NewTransaction(" Dinner out ", card.Id);
+        dinner.Notes = "   ";
+        await alice.SaveTransactionAsync(dinner);
+        var saved = Assert.Single(await alice.GetTransactionsAsync());
+        Assert.Equal(("Dinner out", (string?)null, "Alice card"), (saved.Description, saved.Notes, saved.Account?.Name));
+        Assert.Equal(card.Id, await alice.GetLastTransactionAccountIdAsync());
+
+        // A blank description, a zero or negative amount, and no account are rejected.
+        await Assert.ThrowsAsync<LedgerValidationException>(() => alice.SaveTransactionAsync(NewTransaction("  ", checking.Id)));
+        await Assert.ThrowsAsync<LedgerValidationException>(() => alice.SaveTransactionAsync(NewTransaction("Free", checking.Id, 0m)));
+        await Assert.ThrowsAsync<LedgerValidationException>(() => alice.SaveTransactionAsync(NewTransaction("Negative", checking.Id, -5m)));
+        await Assert.ThrowsAsync<LedgerValidationException>(() => alice.SaveTransactionAsync(NewTransaction("Nowhere", 0)));
+
+        // Bob can't see it, log one on Alice's account or under her category or payee, edit hers, or delete it.
+        var bob = ServiceFor("bob");
+        var bobChecking = Checking("Bob checking");
+        await bob.SaveAccountAsync(bobChecking);
+        var category = new Category { Name = "Dining" };
+        var payee = new Payee { Name = "Luigi's" };
+        await alice.SaveCategoryAsync(category);
+        await alice.SavePayeeAsync(payee);
+
+        Assert.Empty(await bob.GetTransactionsAsync());
+        Assert.Null(await bob.GetLastTransactionAccountIdAsync());
+        Assert.Equal(0, await bob.CountTransactionsAsync(card.Id));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => bob.SaveTransactionAsync(NewTransaction("Sneaky", checking.Id)));
+        var underHerCategory = NewTransaction("Sneaky", bobChecking.Id);
+        underHerCategory.CategoryId = category.Id;
+        await Assert.ThrowsAsync<InvalidOperationException>(() => bob.SaveTransactionAsync(underHerCategory));
+        var toHerPayee = NewTransaction("Sneaky", bobChecking.Id);
+        toHerPayee.PayeeId = payee.Id;
+        await Assert.ThrowsAsync<InvalidOperationException>(() => bob.SaveTransactionAsync(toHerPayee));
+
+        var hijack = dinner.Copy();
+        hijack.AccountId = bobChecking.Id;
+        await Assert.ThrowsAsync<InvalidOperationException>(() => bob.SaveTransactionAsync(hijack));
+        await bob.DeleteTransactionAsync(dinner.Id);
+
+        Assert.Equal(["Dinner out"], (await ServiceFor("alice").GetTransactionsAsync()).Select(t => t.Description));
+        Assert.Equal(1, await ServiceFor("alice").CountTransactionsAsync(card.Id));
+    }
+
+    [Fact]
+    public async Task Transactions_can_be_filtered_by_date_and_are_newest_first()
+    {
+        var alice = ServiceFor("alice");
+        var checking = Checking();
+        await alice.SaveAccountAsync(checking);
+        foreach (var day in new[] { 3, 20, 11 })
+        {
+            var transaction = NewTransaction($"Day {day}", checking.Id);
+            transaction.Date = new DateOnly(2026, 9, day);
+            await alice.SaveTransactionAsync(transaction);
+        }
+
+        Assert.Equal(["Day 20", "Day 11", "Day 3"], (await alice.GetTransactionsAsync()).Select(t => t.Description));
+        Assert.Equal(["Day 11", "Day 3"],
+            (await alice.GetTransactionsAsync(new DateOnly(2026, 9, 1), new DateOnly(2026, 9, 11))).Select(t => t.Description));
+    }
+
+    [Fact]
+    public async Task Deleting_a_category_or_payee_keeps_transactions_and_deleting_the_account_removes_them()
+    {
+        var alice = ServiceFor("alice");
+        var checking = Checking();
+        var category = new Category { Name = "Dining" };
+        var payee = new Payee { Name = "Luigi's" };
+        await alice.SaveAccountAsync(checking);
+        await alice.SaveCategoryAsync(category);
+        await alice.SavePayeeAsync(payee);
+        var dinner = NewTransaction("Dinner out", checking.Id);
+        (dinner.CategoryId, dinner.PayeeId) = (category.Id, payee.Id);
+        await alice.SaveTransactionAsync(dinner);
+
+        await alice.DeleteCategoryAsync(category.Id);
+        await alice.DeletePayeeAsync(payee.Id);
+        var kept = Assert.Single(await alice.GetTransactionsAsync());
+        Assert.Equal(((int?)null, (int?)null), (kept.CategoryId, kept.PayeeId));
+
+        await alice.DeleteAccountAsync(checking.Id);
+        Assert.Empty(await alice.GetTransactionsAsync());
+    }
+
+    [Fact]
+    public async Task Card_payment_estimates_include_transactions_charged_to_the_card()
+    {
+        var alice = ServiceFor("alice");
+        var today = alice.Today;
+        var checking = Checking();
+        checking.BalanceAsOf = today;
+        var card = new Account { Name = "Card", Type = AccountType.CreditCard, Balance = 0m, BalanceAsOf = today, StatementDay = today.AddDays(5).Day };
+        await alice.SaveAccountAsync(checking);
+        await alice.SaveAccountAsync(card);
+        await alice.SaveBillAsync(new Bill
+        {
+            Name = "Card payment", StartDate = today.AddDays(20), PayFromAccountId = checking.Id,
+            CardAccountId = card.Id, CardPaymentRule = CardPaymentRule.StatementBalance
+        });
+        var dinner = NewTransaction("Dinner out", card.Id, 80m);
+        dinner.Date = today;
+        await alice.SaveTransactionAsync(dinner);
+
+        var payment = Assert.Single(await alice.GetBillsAsync());
+        Assert.Equal(80m, payment.PaymentEstimates![today.AddDays(20)]);
+    }
+
     [Fact]
     public async Task Users_cannot_file_a_bill_under_another_users_category()
     {

@@ -187,7 +187,7 @@
                 <MudStack Row="true" Justify="Justify.SpaceBetween" Class="mb-1">
                     <MudStack Spacing="0">
                         <MudText Typo="Typo.body2">Everyday spending</MudText>
-                        <MudText Typo="Typo.caption" Class="mud-text-secondary">Monthly estimate</MudText>
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary">Monthly estimate, including transactions you log on this card</MudText>
                     </MudStack>
                     <MudText Typo="Typo.body2">@_card.MonthlySpending?.ToString("C")</MudText>
                 </MudStack>
@@ -198,6 +198,14 @@
                 <MudStack Row="true" Justify="Justify.SpaceBetween">
                     <MudText Typo="Typo.body2"><strong>About per month</strong></MudText>
                     <MudText Typo="Typo.body2"><strong>@((_charges.Where(b => b.IsActive).Sum(b => Recurrence.MonthlyEquivalent(b.Frequency, b.ExpectedAmount)) + (_card.MonthlySpending ?? 0)).ToString("C"))</strong></MudText>
+                </MudStack>
+            }
+            @if (_transactions.Count > 0)
+            {
+                <MudDivider Class="my-2" />
+                <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center">
+                    <MudText Typo="Typo.body2">@_transactions.Count transaction@(_transactions.Count == 1 ? "" : "s") logged</MudText>
+                    <MudButton Variant="Variant.Text" Size="Size.Small" Href="@($"transactions?account={_card.Id}")">View</MudButton>
                 </MudStack>
             }
         </MudPaper>
@@ -219,6 +227,7 @@
     private CardPayoff? _payoff;
     private List<Bill> _paymentBills = [];
     private List<Bill> _charges = [];
+    private List<Transaction> _transactions = [];
     private List<StatementRow> _statements = [];
     private List<BreadcrumbItem> _breadcrumbs = [];
 
@@ -254,7 +263,8 @@
         _statementDay = CreditCards.StatementDay(_card, bills);
 
         var through = today.AddMonths(6);
-        _simulation = CreditCards.Simulate(_card, bills, through);
+        _transactions = (await Ledger.GetTransactionsAsync()).Where(t => t.AccountId == _card.Id).ToList();
+        _simulation = CreditCards.Simulate(_card, bills, _transactions, through);
         _owedNow = _simulation.OwedOn(today);
         _nextPayment = _simulation.Entries.FirstOrDefault(e => e.Kind == CardEntryKind.Payment && e.Date >= today);
 

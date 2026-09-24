@@ -106,8 +106,10 @@
     private async Task DeleteAsync(Account account)
     {
         var bills = _bills.Count(b => b.PayFromAccountId == account.Id);
+        var transactions = await Ledger.CountTransactionsAsync(account.Id);
         var confirmed = await Dialogs.ShowMessageBoxAsync("Delete account?",
-            $"Delete \"{account.Name}\"? Its income entries are deleted too" +
+            $"Delete \"{account.Name}\"? Its income, transfers" +
+            (transactions > 0 ? $" and {transactions} transaction{(transactions == 1 ? "" : "s")}" : "") + " are deleted too" +
             (bills > 0 ? $", and {bills} bill{(bills == 1 ? "" : "s")} will no longer have a pay-from account." : "."),
             yesText: "Delete", cancelText: "Cancel");
         if (confirmed != true)
