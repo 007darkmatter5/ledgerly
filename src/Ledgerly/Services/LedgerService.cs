@@ -5,8 +5,10 @@ using Microsoft.EntityFrameworkCore;
 namespace Ledgerly.Services;
 
 /// <summary>
-/// Data access for the app. Writes are always limited to the signed-in user's active ledger; reads can also include
-/// ledgers shared with them (see <see cref="LedgerScope"/>).
+/// Data access for the app. Reads default to the signed-in user's active ledger and can also include ledgers shared
+/// with them (see <see cref="LedgerScope"/>). Writes go to the ledger the item belongs to (new items: its
+/// <see cref="ILedgerEntity.LedgerId"/>, 0 meaning the active ledger), only if the user's role there allows it, and
+/// everything the item refers to must be in that same ledger.
 /// Each call uses its own short-lived DbContext.
 /// </summary>
 public class LedgerService(IDbContextFactory<LedgerlyDbContext> dbFactory, ICurrentUser currentUser, TimeProvider clock, DataGeneration? dataGeneration = null,
@@ -122,11 +124,12 @@ public class LedgerService(IDbContextFactory<LedgerlyDbContext> dbFactory, ICurr
 
     /// <summary>
     /// The ledger's accounts. With <paramref name="includeShared"/>, also the accounts of shared ledgers that are
-    /// switched on (to display only: pickers for new or edited items must use the user's own).
+    /// switched on (to display only). Pickers in dialogs pass the item's <paramref name="ledgerId"/> instead, so
+    /// they only offer what the item can refer to.
     /// </summary>
-    public async Task<List<Account>> GetAccountsAsync(bool activeOnly = false, bool includeShared = false)
+    public async Task<List<Account>> GetAccountsAsync(bool activeOnly = false, bool includeShared = false, int ledgerId = 0)
     {
-        var ledgerIds = await ReadLedgerIdsAsync(includeShared);
+        var ledgerIds = await ReadLedgerIdsAsync(includeShared, ledgerId);
         await using var db = await dbFactory.CreateDbContextAsync();
         var accounts = await db.Accounts.AsNoTracking()
             .Where(a => ledgerIds.Contains(a.LedgerId) && (!activeOnly || a.IsActive))
@@ -135,7 +138,7 @@ public class LedgerService(IDbContextFactory<LedgerlyDbContext> dbFactory, ICurr
     }
 
     /// <summary>Saves an account. Credit card details are cleared for other types. Throws <see cref="LedgerValidationException"/> for invalid card details.</summary>
-    public Task SaveAccountAsync(Account account)
+    public async Task SaveAccountAsync(Account account)
     {
         if (!account.IsCreditCard)
         {
@@ -150,22 +153,26 @@ public class LedgerService(IDbContextFactory<LedgerlyDbContext> dbFactory, ICurr
                  || account.MinimumPaymentFloor < 0 || account.MinimumPaymentPercent is < 0 or > 100)
             throw new LedgerValidationException("Credit card amounts can't be negative.");
 
-        return SaveAsync(account);
+        await using var db = await dbFactory.CreateDbContextAsync();
+        await SaveAsync(db, account, await TargetLedgerAsync(db, account, LedgerRole.Editor));
     }
 
-    public Task DeleteAccountAsync(int id) => DeleteAsync<Account>(id);
+    public Task DeleteAccountAsync(int id) => DeleteAsync<Account>(id, LedgerRole.Editor);
 
     // Categories
 
-    public async Task<List<Category>> GetCategoriesAsync(bool includeShared = false)
+    public async Task<List<Category>> GetCategoriesAsync(bool includeShared = false, int ledgerId = 0)
     {
-        var ledgerIds = await ReadLedgerIdsAsync(includeShared);
+        var ledgerIds = await ReadLedgerIdsAsync(includeShared, ledgerId);
         await using var db = await dbFactory.CreateDbContextAsync();
         var categories = await db.Categories.AsNoTracking().Where(c => ledgerIds.Contains(c.LedgerId)).ToListAsync();
         return categories.OrderBy(c => c.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
     }
 
-    /// <summary>Adds or renames a category. Throws <see cref="LedgerValidationException"/> for a blank or duplicate name.</summary>
+    /// <summary>
+    /// Adds or renames a category. Throws <see cref="LedgerValidationException"/> for a blank or duplicate name.
+    /// Contributors can add categories (for their transactions); changing one takes an editor.
+    /// </summary>
     public async Task SaveCategoryAsync(Category category)
     {
         category.Name = category.Name.Trim();
@@ -174,28 +181,27 @@ public class LedgerService(IDbContextFactory<LedgerlyDbContext> dbFactory, ICurr
         if (category.Name.Length > 50)
             throw new LedgerValidationException("Category names can be up to 50 characters.");
 
-        var ledgerId = await LedgerIdAsync();
         await using (var db = await dbFactory.CreateDbContextAsync())
         {
+            var ledgerId = await TargetLedgerAsync(db, category, category.Id == 0 ? LedgerRole.Contributor : LedgerRole.Editor);
             var names = await db.Categories.AsNoTracking()
                 .Where(c => c.LedgerId == ledgerId && c.Id != category.Id)
                 .Select(c => c.Name)
                 .ToListAsync();
             if (names.Contains(category.Name, StringComparer.OrdinalIgnoreCase))
                 throw new LedgerValidationException($"There's already a category called \"{category.Name}\".");
+            await SaveAsync(db, category, ledgerId);
         }
-
-        await SaveAsync(category);
     }
 
     /// <summary>Deletes a category. Its bills are kept and become uncategorized.</summary>
-    public Task DeleteCategoryAsync(int id) => DeleteAsync<Category>(id);
+    public Task DeleteCategoryAsync(int id) => DeleteAsync<Category>(id, LedgerRole.Editor);
 
     // Payees
 
-    public async Task<List<Payee>> GetPayeesAsync(bool includeShared = false)
+    public async Task<List<Payee>> GetPayeesAsync(bool includeShared = false, int ledgerId = 0)
     {
-        var ledgerIds = await ReadLedgerIdsAsync(includeShared);
+        var ledgerIds = await ReadLedgerIdsAsync(includeShared, ledgerId);
         await using var db = await dbFactory.CreateDbContextAsync();
         var payees = await db.Payees.AsNoTracking().Where(p => ledgerIds.Contains(p.LedgerId)).ToListAsync();
         return payees.OrderBy(p => p.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
@@ -204,6 +210,7 @@ public class LedgerService(IDbContextFactory<LedgerlyDbContext> dbFactory, ICurr
     /// <summary>
     /// Adds or updates a payee. Throws <see cref="LedgerValidationException"/> for a blank or duplicate
     /// name, or a website that isn't a valid http(s) address. The website is stored normalized.
+    /// Contributors can add payees (for their transactions); changing one takes an editor.
     /// </summary>
     public async Task SavePayeeAsync(Payee payee)
     {
@@ -217,22 +224,20 @@ public class LedgerService(IDbContextFactory<LedgerlyDbContext> dbFactory, ICurr
         payee.WebsiteUrl = url;
         payee.Notes = string.IsNullOrWhiteSpace(payee.Notes) ? null : payee.Notes.Trim();
 
-        var ledgerId = await LedgerIdAsync();
-        await using (var db = await dbFactory.CreateDbContextAsync())
-        {
-            var names = await db.Payees.AsNoTracking()
-                .Where(p => p.LedgerId == ledgerId && p.Id != payee.Id)
-                .Select(p => p.Name)
-                .ToListAsync();
-            if (names.Contains(payee.Name, StringComparer.OrdinalIgnoreCase))
-                throw new LedgerValidationException($"There's already a payee called \"{payee.Name}\".");
-        }
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var ledgerId = await TargetLedgerAsync(db, payee, payee.Id == 0 ? LedgerRole.Contributor : LedgerRole.Editor);
+        var names = await db.Payees.AsNoTracking()
+            .Where(p => p.LedgerId == ledgerId && p.Id != payee.Id)
+            .Select(p => p.Name)
+            .ToListAsync();
+        if (names.Contains(payee.Name, StringComparer.OrdinalIgnoreCase))
+            throw new LedgerValidationException($"There's already a payee called \"{payee.Name}\".");
 
-        await SaveAsync(payee);
+        await SaveAsync(db, payee, ledgerId);
     }
 
     /// <summary>Deletes a payee. Its bills and loans are kept, without a payee or lender.</summary>
-    public Task DeletePayeeAsync(int id) => DeleteAsync<Payee>(id);
+    public Task DeletePayeeAsync(int id) => DeleteAsync<Payee>(id, LedgerRole.Editor);
 
     // Bills
 
@@ -263,30 +268,28 @@ public class LedgerService(IDbContextFactory<LedgerlyDbContext> dbFactory, ICurr
     /// <summary>Saves a bill. Throws <see cref="LedgerValidationException"/> if it links a loan and a card, or pays a card from a card.</summary>
     public async Task SaveBillAsync(Bill bill)
     {
-        var ledgerId = await LedgerIdAsync();
-        await using (var db = await dbFactory.CreateDbContextAsync())
-        {
-            await EnsureInLedgerAsync(db.Accounts, bill.PayFromAccountId, ledgerId);
-            await EnsureInLedgerAsync(db.Accounts, bill.CardAccountId, ledgerId);
-            await EnsureInLedgerAsync(db.Loans, bill.LoanId, ledgerId);
-            await EnsureInLedgerAsync(db.Categories, bill.CategoryId, ledgerId);
-            await EnsureInLedgerAsync(db.Payees, bill.PayeeId, ledgerId);
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var ledgerId = await TargetLedgerAsync(db, bill, LedgerRole.Editor);
+        await EnsureInLedgerAsync(db.Accounts, bill.PayFromAccountId, ledgerId);
+        await EnsureInLedgerAsync(db.Accounts, bill.CardAccountId, ledgerId);
+        await EnsureInLedgerAsync(db.Loans, bill.LoanId, ledgerId);
+        await EnsureInLedgerAsync(db.Categories, bill.CategoryId, ledgerId);
+        await EnsureInLedgerAsync(db.Payees, bill.PayeeId, ledgerId);
 
-            if (bill.CardAccountId is { } cardId)
-            {
-                if (bill.LoanId is not null)
-                    throw new LedgerValidationException("A bill can pay a loan or a credit card, not both.");
-                var types = await db.Accounts.Where(a => a.Id == cardId || a.Id == bill.PayFromAccountId).Select(a => new { a.Id, a.Type }).ToListAsync();
-                if (types.Single(a => a.Id == cardId).Type != AccountType.CreditCard)
-                    throw new LedgerValidationException("Choose a credit card account for this payment.");
-                if (bill.PayFromAccountId == cardId || types.Any(a => a.Id == bill.PayFromAccountId && a.Type == AccountType.CreditCard))
-                    throw new LedgerValidationException("Pay a credit card from a bank account, not from a credit card.");
-            }
+        if (bill.CardAccountId is { } cardId)
+        {
+            if (bill.LoanId is not null)
+                throw new LedgerValidationException("A bill can pay a loan or a credit card, not both.");
+            var types = await db.Accounts.Where(a => a.Id == cardId || a.Id == bill.PayFromAccountId).Select(a => new { a.Id, a.Type }).ToListAsync();
+            if (types.Single(a => a.Id == cardId).Type != AccountType.CreditCard)
+                throw new LedgerValidationException("Choose a credit card account for this payment.");
+            if (bill.PayFromAccountId == cardId || types.Any(a => a.Id == bill.PayFromAccountId && a.Type == AccountType.CreditCard))
+                throw new LedgerValidationException("Pay a credit card from a bank account, not from a credit card.");
         }
-        await SaveAsync(bill);
+        await SaveAsync(db, bill, ledgerId);
     }
 
-    public Task DeleteBillAsync(int id) => DeleteAsync<Bill>(id);
+    public Task DeleteBillAsync(int id) => DeleteAsync<Bill>(id, LedgerRole.Editor);
 
     /// <summary>
     /// Records the amount and/or payment for one due date of a bill. For loan bills, <paramref name="paymentKind"/>
@@ -294,9 +297,8 @@ public class LedgerService(IDbContextFactory<LedgerlyDbContext> dbFactory, ICurr
     /// </summary>
     public async Task RecordOccurrenceAsync(int billId, DateOnly dueDate, decimal? amount, DateOnly? paidOn, string? notes = null, LoanPaymentKind? paymentKind = null)
     {
-        var ledgerId = await LedgerIdAsync();
         await using var db = await dbFactory.CreateDbContextAsync();
-        await EnsureInLedgerAsync(db.Bills, billId, ledgerId);
+        await LedgerOfAsync(db.Bills, billId, LedgerRole.Contributor);
         var occurrence = await db.BillOccurrences.SingleOrDefaultAsync(o => o.BillId == billId && o.DueDate == dueDate);
 
         if (amount is null && paidOn is null && string.IsNullOrWhiteSpace(notes) && paymentKind is null)
@@ -319,7 +321,7 @@ public class LedgerService(IDbContextFactory<LedgerlyDbContext> dbFactory, ICurr
 
     /// <summary>
     /// Marks due dates paid on their due date (or today, if that's earlier), keeping any amount, notes or
-    /// payment type already recorded for them.
+    /// payment type already recorded for them. The bills can be in any ledger the user can record payments in.
     /// </summary>
     public async Task MarkPaidAsync(IEnumerable<(int BillId, DateOnly DueDate)> dues)
     {
@@ -327,10 +329,10 @@ public class LedgerService(IDbContextFactory<LedgerlyDbContext> dbFactory, ICurr
         if (list.Count == 0)
             return;
 
-        var ledgerId = await LedgerIdAsync();
+        var ledgerIds = await WritableLedgerIdsAsync(LedgerRole.Contributor);
         await using var db = await dbFactory.CreateDbContextAsync();
         var billIds = list.Select(d => d.BillId).Distinct().ToList();
-        var owned = await db.Bills.Where(b => b.LedgerId == ledgerId && billIds.Contains(b.Id)).Select(b => b.Id).ToListAsync();
+        var owned = await db.Bills.Where(b => ledgerIds.Contains(b.LedgerId) && billIds.Contains(b.Id)).Select(b => b.Id).ToListAsync();
         if (billIds.Except(owned).FirstOrDefault() is var missing and not 0)
             throw new InvalidOperationException($"Bill {missing} was not found.");
 
@@ -347,16 +349,15 @@ public class LedgerService(IDbContextFactory<LedgerlyDbContext> dbFactory, ICurr
 
     /// <summary>
     /// Records an extra principal payment already made on a loan, as a one-time paid bill so it also
-    /// appears in the paying account's running balance.
+    /// appears in the paying account's running balance. It goes in the loan's ledger, and contributors can record one.
     /// </summary>
     public async Task RecordExtraLoanPaymentAsync(int loanId, int? payFromAccountId, decimal amount, DateOnly paidOn, string? notes)
     {
         if (amount <= 0)
             throw new ArgumentOutOfRangeException(nameof(amount), "The payment must be more than zero.");
 
-        var ledgerId = await LedgerIdAsync();
         await using var db = await dbFactory.CreateDbContextAsync();
-        await EnsureInLedgerAsync(db.Loans, loanId, ledgerId);
+        var ledgerId = await LedgerOfAsync(db.Loans, loanId, LedgerRole.Contributor);
         await EnsureInLedgerAsync(db.Accounts, payFromAccountId, ledgerId);
         var loan = await db.Loans.AsNoTracking().SingleAsync(l => l.Id == loanId);
 
@@ -396,13 +397,13 @@ public class LedgerService(IDbContextFactory<LedgerlyDbContext> dbFactory, ICurr
 
     public async Task SaveIncomeAsync(Income income)
     {
-        var ledgerId = await LedgerIdAsync();
-        await using (var db = await dbFactory.CreateDbContextAsync())
-            await EnsureInLedgerAsync(db.Accounts, income.DepositToAccountId, ledgerId);
-        await SaveAsync(income);
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var ledgerId = await TargetLedgerAsync(db, income, LedgerRole.Editor);
+        await EnsureInLedgerAsync(db.Accounts, income.DepositToAccountId, ledgerId);
+        await SaveAsync(db, income, ledgerId);
     }
 
-    public Task DeleteIncomeAsync(int id) => DeleteAsync<Income>(id);
+    public Task DeleteIncomeAsync(int id) => DeleteAsync<Income>(id, LedgerRole.Editor);
 
     // Transfers
 
@@ -433,32 +434,29 @@ public class LedgerService(IDbContextFactory<LedgerlyDbContext> dbFactory, ICurr
         if (transfer.FromAccountId == transfer.ToAccountId)
             throw new LedgerValidationException("Choose two different accounts to move money between.");
 
-        var ledgerId = await LedgerIdAsync();
-        await using (var db = await dbFactory.CreateDbContextAsync())
-        {
-            await EnsureInLedgerAsync(db.Accounts, transfer.FromAccountId, ledgerId);
-            await EnsureInLedgerAsync(db.Accounts, transfer.ToAccountId, ledgerId);
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var ledgerId = await TargetLedgerAsync(db, transfer, LedgerRole.Editor);
+        await EnsureInLedgerAsync(db.Accounts, transfer.FromAccountId, ledgerId);
+        await EnsureInLedgerAsync(db.Accounts, transfer.ToAccountId, ledgerId);
 
-            // A card's balance is worked out by CreditCards.Simulate from the bills that charge and pay it,
-            // so money arriving another way would be counted twice.
-            var cards = await db.Accounts
-                .Where(a => (a.Id == transfer.FromAccountId || a.Id == transfer.ToAccountId) && a.Type == AccountType.CreditCard)
-                .AnyAsync();
-            if (cards)
-                throw new LedgerValidationException("Transfers move money between bank accounts. To pay a credit card, add a bill that pays the card.");
-        }
+        // A card's balance is worked out by CreditCards.Simulate from the bills that charge and pay it,
+        // so money arriving another way would be counted twice.
+        var cards = await db.Accounts
+            .Where(a => (a.Id == transfer.FromAccountId || a.Id == transfer.ToAccountId) && a.Type == AccountType.CreditCard)
+            .AnyAsync();
+        if (cards)
+            throw new LedgerValidationException("Transfers move money between bank accounts. To pay a credit card, add a bill that pays the card.");
 
-        await SaveAsync(transfer);
+        await SaveAsync(db, transfer, ledgerId);
     }
 
-    public Task DeleteTransferAsync(int id) => DeleteAsync<Transfer>(id);
+    public Task DeleteTransferAsync(int id) => DeleteAsync<Transfer>(id, LedgerRole.Editor);
 
     /// <summary>Records the amount and/or completion for one scheduled date of a transfer.</summary>
     public async Task RecordTransferOccurrenceAsync(int transferId, DateOnly scheduledDate, decimal? amount, DateOnly? completedOn, string? notes = null)
     {
-        var ledgerId = await LedgerIdAsync();
         await using var db = await dbFactory.CreateDbContextAsync();
-        await EnsureInLedgerAsync(db.Transfers, transferId, ledgerId);
+        await LedgerOfAsync(db.Transfers, transferId, LedgerRole.Contributor);
         var occurrence = await db.TransferOccurrences.SingleOrDefaultAsync(o => o.TransferId == transferId && o.ScheduledDate == scheduledDate);
 
         if (amount is null && completedOn is null && string.IsNullOrWhiteSpace(notes))
@@ -511,40 +509,38 @@ public class LedgerService(IDbContextFactory<LedgerlyDbContext> dbFactory, ICurr
             throw new LedgerValidationException("Choose an account.");
         transaction.Notes = string.IsNullOrWhiteSpace(transaction.Notes) ? null : transaction.Notes.Trim();
 
-        var ledgerId = await LedgerIdAsync();
-        await using (var db = await dbFactory.CreateDbContextAsync())
-        {
-            await EnsureInLedgerAsync(db.Accounts, transaction.AccountId, ledgerId);
-            await EnsureInLedgerAsync(db.Categories, transaction.CategoryId, ledgerId);
-            await EnsureInLedgerAsync(db.Payees, transaction.PayeeId, ledgerId);
-        }
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var ledgerId = await TargetLedgerAsync(db, transaction, LedgerRole.Contributor);
+        await EnsureInLedgerAsync(db.Accounts, transaction.AccountId, ledgerId);
+        await EnsureInLedgerAsync(db.Categories, transaction.CategoryId, ledgerId);
+        await EnsureInLedgerAsync(db.Payees, transaction.PayeeId, ledgerId);
 
-        await SaveAsync(transaction);
+        await SaveAsync(db, transaction, ledgerId);
     }
 
-    public Task DeleteTransactionAsync(int id) => DeleteAsync<Transaction>(id);
+    public Task DeleteTransactionAsync(int id) => DeleteAsync<Transaction>(id, LedgerRole.Contributor);
 
-    /// <summary>The account of the most recently added transaction, to suggest for the next one.</summary>
-    public async Task<int?> GetLastTransactionAccountIdAsync()
+    /// <summary>The account of the most recently added transaction in a ledger (0: the active one), to suggest for the next one.</summary>
+    public async Task<int?> GetLastTransactionAccountIdAsync(int ledgerId = 0)
     {
-        var ledgerId = await LedgerIdAsync();
+        var ledgerIds = await ReadLedgerIdsAsync(includeShared: false, ledgerId);
         await using var db = await dbFactory.CreateDbContextAsync();
-        return await db.Transactions.Where(t => t.LedgerId == ledgerId).OrderByDescending(t => t.Id).Select(t => (int?)t.AccountId).FirstOrDefaultAsync();
+        return await db.Transactions.Where(t => ledgerIds.Contains(t.LedgerId)).OrderByDescending(t => t.Id).Select(t => (int?)t.AccountId).FirstOrDefaultAsync();
     }
 
     /// <summary>How many transactions an account has, to warn before deleting it (they're deleted with it).</summary>
     public async Task<int> CountTransactionsAsync(int accountId)
     {
-        var ledgerId = await LedgerIdAsync();
+        var ledgerIds = await ReadLedgerIdsAsync(includeShared: true);
         await using var db = await dbFactory.CreateDbContextAsync();
-        return await db.Transactions.CountAsync(t => t.LedgerId == ledgerId && t.AccountId == accountId);
+        return await db.Transactions.CountAsync(t => ledgerIds.Contains(t.LedgerId) && t.AccountId == accountId);
     }
 
     // Loans
 
-    public async Task<List<Loan>> GetLoansAsync(bool includeShared = false)
+    public async Task<List<Loan>> GetLoansAsync(bool includeShared = false, int ledgerId = 0)
     {
-        var ledgerIds = await ReadLedgerIdsAsync(includeShared);
+        var ledgerIds = await ReadLedgerIdsAsync(includeShared, ledgerId);
         await using var db = await dbFactory.CreateDbContextAsync();
         var loans = await db.Loans.AsNoTracking().Where(l => ledgerIds.Contains(l.LedgerId)).Include(l => l.Lender).ToListAsync();
         return loans.OrderBy(l => l.Name).ToList();
@@ -560,13 +556,13 @@ public class LedgerService(IDbContextFactory<LedgerlyDbContext> dbFactory, ICurr
 
     public async Task SaveLoanAsync(Loan loan)
     {
-        var ledgerId = await LedgerIdAsync();
-        await using (var db = await dbFactory.CreateDbContextAsync())
-            await EnsureInLedgerAsync(db.Payees, loan.LenderId, ledgerId);
-        await SaveAsync(loan);
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var ledgerId = await TargetLedgerAsync(db, loan, LedgerRole.Editor);
+        await EnsureInLedgerAsync(db.Payees, loan.LenderId, ledgerId);
+        await SaveAsync(db, loan, ledgerId);
     }
 
-    public Task DeleteLoanAsync(int id) => DeleteAsync<Loan>(id);
+    public Task DeleteLoanAsync(int id) => DeleteAsync<Loan>(id, LedgerRole.Editor);
 
     // Projection
 
@@ -620,10 +616,10 @@ public class LedgerService(IDbContextFactory<LedgerlyDbContext> dbFactory, ICurr
 
     /// <summary>
     /// Shares the user's own ledger (never the sample one) with the account that uses <paramref name="email"/>, as
-    /// an invitation they have to accept. View only for now. Throws <see cref="LedgerValidationException"/> for a
-    /// blank or unknown email, the user's own, or someone it's already shared with.
+    /// an invitation they have to accept. Throws <see cref="LedgerValidationException"/> for a blank or unknown
+    /// email, the user's own, or someone it's already shared with.
     /// </summary>
-    public async Task ShareAsync(string email)
+    public async Task ShareAsync(string email, LedgerRole role = LedgerRole.Viewer)
     {
         email = email.Trim();
         if (email.Length == 0)
@@ -641,9 +637,23 @@ public class LedgerService(IDbContextFactory<LedgerlyDbContext> dbFactory, ICurr
         if (await db.LedgerMembers.AnyAsync(m => m.LedgerId == ledger.Id && m.UserId == recipient))
             throw new LedgerValidationException($"Your ledger is already shared with {email}.");
 
-        db.LedgerMembers.Add(new LedgerMember { LedgerId = ledger.Id, UserId = recipient, Role = LedgerRole.Viewer, InvitedAt = DateTime.UtcNow });
+        db.LedgerMembers.Add(new LedgerMember { LedgerId = ledger.Id, UserId = recipient, Role = role, InvitedAt = DateTime.UtcNow });
         await db.SaveChangesAsync();
         notifier?.Notify(recipient);
+    }
+
+    /// <summary>Changes what someone the user shares their ledger with may do in it. Applies straight away.</summary>
+    public async Task SetShareRoleAsync(int memberId, LedgerRole role)
+    {
+        if (!Enum.IsDefined(role))
+            throw new ArgumentOutOfRangeException(nameof(role));
+        var userId = await RequireUserIdAsync();
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var member = await db.LedgerMembers.Where(m => m.Id == memberId && m.Ledger!.OwnerId == userId).Select(m => m.UserId).SingleOrDefaultAsync();
+        if (member is null)
+            return;
+        await db.LedgerMembers.Where(m => m.Id == memberId).ExecuteUpdateAsync(s => s.SetProperty(m => m.Role, role));
+        notifier?.Notify(member);
     }
 
     /// <summary>Who the user's own ledger is shared with, including invitations not yet answered.</summary>
@@ -776,11 +786,64 @@ public class LedgerService(IDbContextFactory<LedgerlyDbContext> dbFactory, ICurr
     private async Task<int> LedgerIdAsync() => (await GetActiveLedgerAsync()).Id;
 
     /// <summary>
-    /// Ledgers to read from: the home ledger, plus shared ledgers that are switched on when asked for. Writes never
-    /// use this; they're always limited to the home ledger.
+    /// Ledgers to read from: the home ledger, plus shared ledgers that are switched on when asked for; or just
+    /// <paramref name="ledgerId"/> when it's given (it must be one of those). Writes never use this.
     /// </summary>
-    private async Task<List<int>> ReadLedgerIdsAsync(bool includeShared) =>
-        includeShared ? [.. (await GetScopeAsync()).VisibleLedgerIds] : [await LedgerIdAsync()];
+    private async Task<List<int>> ReadLedgerIdsAsync(bool includeShared, int ledgerId = 0)
+    {
+        if (ledgerId == 0)
+            return includeShared ? [.. (await GetScopeAsync()).VisibleLedgerIds] : [await LedgerIdAsync()];
+        if (!(await GetScopeAsync()).VisibleLedgerIds.Contains(ledgerId))
+            throw new InvalidOperationException($"Ledger {ledgerId} was not found.");
+        return [ledgerId];
+    }
+
+    /// <summary>The home ledger and the shared ledgers (switched on) where the user has at least <paramref name="role"/>.</summary>
+    private async Task<List<int>> WritableLedgerIdsAsync(LedgerRole role)
+    {
+        var scope = await GetScopeAsync();
+        return [scope.HomeLedgerId, .. scope.WritableShared(role).Select(s => s.LedgerId)];
+    }
+
+    /// <summary>Checks the user may write to a ledger with <paramref name="role"/>. 0 means the home ledger.</summary>
+    private async Task<int> RequireWritableAsync(int ledgerId, LedgerRole role)
+    {
+        var scope = await GetScopeAsync();
+        if (ledgerId == 0)
+            return scope.HomeLedgerId;
+        RequireRole(scope, ledgerId, role);
+        return ledgerId;
+    }
+
+    private static void RequireRole(LedgerScope scope, int ledgerId, LedgerRole role)
+    {
+        var actual = scope.RoleIn(ledgerId) ?? throw new InvalidOperationException($"Ledger {ledgerId} was not found.");
+        if (actual < role)
+            throw new LedgerValidationException(actual == LedgerRole.Viewer
+                ? "This ledger is shared with you view only, so you can't change it."
+                : "You can add transactions and record payments in this ledger, but only its owner or an editor can change this.");
+    }
+
+    /// <summary>
+    /// The ledger a row is in, checking the user may write there with <paramref name="role"/>. Rows in ledgers the user
+    /// can't see are reported as not found.
+    /// </summary>
+    private async Task<int> LedgerOfAsync<T>(DbSet<T> set, int id, LedgerRole role) where T : class, ILedgerEntity
+    {
+        var scope = await GetScopeAsync();
+        var visible = scope.VisibleLedgerIds;
+        var ledgerId = await set.Where(e => e.Id == id && visible.Contains(e.LedgerId)).Select(e => (int?)e.LedgerId).SingleOrDefaultAsync()
+            ?? throw new InvalidOperationException($"{typeof(T).Name} {id} was not found.");
+        RequireRole(scope, ledgerId, role);
+        return ledgerId;
+    }
+
+    /// <summary>
+    /// Where a save goes: the ledger an existing row is already in (it can't move), or for a new one the ledger it
+    /// names (0: the home ledger). Either way the user needs at least <paramref name="role"/> there.
+    /// </summary>
+    private Task<int> TargetLedgerAsync<T>(LedgerlyDbContext db, T entity, LedgerRole role) where T : class, ILedgerEntity =>
+        entity.Id == 0 ? RequireWritableAsync(entity.LedgerId, role) : LedgerOfAsync(db.Set<T>(), entity.Id, role);
 
     private static async Task<Ledger> GetOrCreateLedgerAsync(LedgerlyDbContext db, string userId, bool isSample)
     {
@@ -813,7 +876,10 @@ public class LedgerService(IDbContextFactory<LedgerlyDbContext> dbFactory, ICurr
         (_activeLedger, _activeLedgerGeneration) = (ledger, dataGeneration?.Value ?? 0);
     }
 
-    /// <summary>Rejects references (e.g. a bill's pay-from account) to rows outside the active ledger.</summary>
+    /// <summary>
+    /// Rejects references (e.g. a bill's pay-from account) to rows outside the item's own ledger, so nothing points
+    /// across ledgers.
+    /// </summary>
     private static async Task EnsureInLedgerAsync<T>(DbSet<T> set, int? id, int ledgerId) where T : class, ILedgerEntity
     {
         if (id is { } value && !await set.AnyAsync(e => e.Id == value && e.LedgerId == ledgerId))
@@ -821,13 +887,11 @@ public class LedgerService(IDbContextFactory<LedgerlyDbContext> dbFactory, ICurr
     }
 
     /// <summary>
-    /// Inserts or updates scalar values only, so navigation properties on the passed-in object are
-    /// never attached. Updates only succeed for rows in the active ledger.
+    /// Inserts or updates scalar values only, so navigation properties on the passed-in object are never attached.
+    /// <paramref name="ledgerId"/> comes from <see cref="TargetLedgerAsync"/>; updates only succeed for rows in it.
     /// </summary>
-    private async Task SaveAsync<T>(T entity) where T : class, ILedgerEntity, new()
+    private static async Task SaveAsync<T>(LedgerlyDbContext db, T entity, int ledgerId) where T : class, ILedgerEntity, new()
     {
-        var ledgerId = await LedgerIdAsync();
-        await using var db = await dbFactory.CreateDbContextAsync();
         T target;
         if (entity.Id == 0)
         {
@@ -850,10 +914,15 @@ public class LedgerService(IDbContextFactory<LedgerlyDbContext> dbFactory, ICurr
         entity.LedgerId = ledgerId;
     }
 
-    private async Task DeleteAsync<T>(int id) where T : class, ILedgerEntity
+    private async Task DeleteAsync<T>(int id, LedgerRole role) where T : class, ILedgerEntity
     {
-        var ledgerId = await LedgerIdAsync();
+        var scope = await GetScopeAsync();
+        var visible = scope.VisibleLedgerIds;
         await using var db = await dbFactory.CreateDbContextAsync();
+        var ledgerId = await db.Set<T>().Where(e => e.Id == id && visible.Contains(e.LedgerId)).Select(e => (int?)e.LedgerId).SingleOrDefaultAsync();
+        if (ledgerId is null)
+            return; // already gone, or not something the user can see
+        RequireRole(scope, ledgerId.Value, role);
         await db.Set<T>().Where(e => e.Id == id && e.LedgerId == ledgerId).ExecuteDeleteAsync();
     }
 }

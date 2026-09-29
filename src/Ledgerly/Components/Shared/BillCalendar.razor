@@ -175,13 +175,15 @@
         $"{transaction.Description}: {(transaction.IsSpent ? "" : "+")}{transaction.Amount:C} {(transaction.IsSpent ? "from" : "into")} {transaction.Account?.Name}";
 
     /// <summary>
-    /// A calendar entry: a button that opens it, or for a shared ledger's entry, a plain box in that ledger's color,
-    /// since it's view only.
+    /// A calendar entry: a button that opens it (edged in the ledger's color when shared), or a plain box in that
+    /// color for a shared ledger the user can't record things in.
     /// </summary>
     private RenderFragment CalItem(int ledgerId, string cssClass, string description, Func<Task> open, RenderFragment content) =>
-        Scope?.SharedFor(ledgerId) is { } shared
-            ? @<div class="@($"{cssClass} shared")" style="@($"--ledger-color:{shared.Color}")" title="@($"{description} · {shared.Name}, view only")" aria-label="@($"{description} · {shared.Name}, view only")">@content</div>
-            : @<button type="button" class="@cssClass" title="@description" aria-label="@description" @onclick="open">@content</button>;
+        Scope?.SharedFor(ledgerId) is not { } shared
+            ? @<button type="button" class="@cssClass" title="@description" aria-label="@description" @onclick="open">@content</button>
+            : Scope.CanContribute(ledgerId)
+                ? @<button type="button" class="@($"{cssClass} shared editable")" style="@($"--ledger-color:{shared.Color}")" title="@($"{description} · {shared.Name}")" aria-label="@($"{description} · {shared.Name}")" @onclick="open">@content</button>
+                : @<div class="@($"{cssClass} shared")" style="@($"--ledger-color:{shared.Color}")" title="@($"{description} · {shared.Name}, view only")" aria-label="@($"{description} · {shared.Name}, view only")">@content</div>;
 
     private RenderFragment TransactionButton(Transaction transaction, string format = "C0") =>
         CalItem(transaction.LedgerId, $"cal-item transaction{(transaction.IsSpent ? "" : " received")}", Describe(transaction), () => OpenAsync(transaction), @<text>

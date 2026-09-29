@@ -34,7 +34,7 @@
     <MudSpacer />
     <MudStack Row="true" Spacing="2" Wrap="Wrap.Wrap">
         <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.ShowChart" Href="@($"projection?accounts={_card.Id}")">Running balance</MudButton>
-        @if (IsMine)
+        @if (CanEdit)
         {
             <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Edit" OnClick="EditCardAsync">Edit card</MudButton>
         }
@@ -71,7 +71,7 @@
     </MudItem>
 </MudGrid>
 
-@if (_card.StatementDay is null && IsMine)
+@if (_card.StatementDay is null && CanEdit)
 {
     <MudAlert Severity="Severity.Info" Class="mb-3" Dense="true">
         Set the day the statement closes (<MudLink OnClick="EditCardAsync">Edit card</MudLink>) for accurate statement and payment estimates.
@@ -160,13 +160,13 @@
                             · @Display.Of(bill.Frequency).ToLowerInvariant() from @(bill.PayFromAccount?.Name ?? "no account")@(bill.AutoPay ? " · autopay" : "")@(bill.IsActive ? "" : " · inactive")
                         </MudText>
                     </MudStack>
-                    @if (IsMine)
+                    @if (CanEdit)
                     {
                         <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="() => EditBillAsync(bill)" aria-label="@($"Edit {bill.Name}")" />
                     }
                 </MudStack>
             }
-            @if (IsMine && !_paymentBills.Any(b => b.IsActive))
+            @if (CanEdit && !_paymentBills.Any(b => b.IsActive))
             {
                 <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.Add" OnClick="() => EditBillAsync(null)">Set up payment</MudButton>
             }
@@ -241,8 +241,8 @@
 
     [CascadingParameter] private LedgerScope Scope { get; set; } = LedgerScope.None;
 
-    /// <summary>A card in a ledger shared with the user is view only.</summary>
-    private bool IsMine => _card is not null && Scope.IsHome(_card.LedgerId);
+    /// <summary>The card is in the user's own ledger, or a shared one they can edit.</summary>
+    private bool CanEdit => _card is not null && Scope.CanEdit(_card.LedgerId);
 
     private List<ChartSeries<double>> _series = [];
     private string[] _labels = [];
@@ -333,7 +333,8 @@
     {
         var model = bill?.Copy() ?? new Bill
         {
-            Name = $"{_card!.Name} payment",
+            LedgerId = _card!.LedgerId,
+            Name = $"{_card.Name} payment",
             CardAccountId = _card.Id,
             CardPaymentRule = CardPaymentRule.StatementBalance
         };
@@ -342,7 +343,8 @@
         var parameters = new DialogParameters<BillDialog>
         {
             { d => d.Model, model },
-            { d => d.SuggestedStartDate, nextClose.AddDays(25) }
+            { d => d.SuggestedStartDate, nextClose.AddDays(25) },
+            { d => d.LedgerFixed, true }
         };
         var dialog = await Dialogs.ShowAsync<BillDialog>(bill is null ? "Set up card payment" : "Edit bill", parameters,
             new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true });

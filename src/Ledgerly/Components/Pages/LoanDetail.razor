@@ -49,9 +49,12 @@
         {
             <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.OpenInNew" Href="@lenderSite" Target="_blank" Rel="noopener noreferrer">Open lender site</MudButton>
         }
-        @if (IsMine)
+        @if (CanRecord)
         {
             <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.AddCard" OnClick="RecordExtraPaymentAsync">Record extra payment</MudButton>
+        }
+        @if (CanEdit)
+        {
             <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Edit" OnClick="EditAsync">Edit loan</MudButton>
         }
     </MudStack>
@@ -121,13 +124,13 @@
                             <MudText Typo="Typo.caption" Color="Color.Warning">Differs from the loan payment of @MonthlyAmount.ToString("C"); may include escrow or fees.</MudText>
                         }
                     </MudStack>
-                    @if (IsMine)
+                    @if (CanEdit)
                     {
                         <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="() => EditBillAsync(bill)" aria-label="Edit bill" />
                     }
                 </MudStack>
             }
-            @if (IsMine)
+            @if (CanEdit)
             {
                 <MudStack Row="true" Spacing="2" Wrap="Wrap.Wrap" Class="mt-2">
                     @if (!_bills.Any(b => b.LoanPaymentKind == LoanPaymentKind.MonthlyPayment && b.IsActive))
@@ -207,7 +210,7 @@
         @if (_whatIfExtra != _loan.ExtraPrincipal)
         {
             <MudButton Size="Size.Small" OnClick="() => OnWhatIfChanged(_loan.ExtraPrincipal)">Reset</MudButton>
-            @if (IsMine)
+            @if (CanEdit)
             {
                 <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Secondary" OnClick="SaveExtraAsync">Save as my extra payment</MudButton>
             }
@@ -253,8 +256,11 @@ else
 
     [CascadingParameter] private LedgerScope Scope { get; set; } = LedgerScope.None;
 
-    /// <summary>A loan in a ledger shared with the user is view only.</summary>
-    private bool IsMine => _loan is not null && Scope.IsHome(_loan.LedgerId);
+    /// <summary>The loan is in the user's own ledger, or a shared one they can edit.</summary>
+    private bool CanEdit => _loan is not null && Scope.CanEdit(_loan.LedgerId);
+
+    /// <summary>Extra payments already made can be recorded by contributors too.</summary>
+    private bool CanRecord => _loan is not null && Scope.CanContribute(_loan.LedgerId);
 
     protected override async Task OnParametersSetAsync() => await LoadAsync();
 
@@ -353,7 +359,8 @@ else
         var bill = kind == LoanPaymentKind.MonthlyPayment
             ? new Bill
             {
-                Name = _loan!.Name,
+                LedgerId = _loan!.LedgerId,
+                Name = _loan.Name,
                 PayeeId = _loan.LenderId,
                 CategoryId = categoryId,
                 LoanId = _loan.Id,
@@ -363,7 +370,8 @@ else
             }
             : new Bill
             {
-                Name = $"{_loan!.Name} extra payment",
+                LedgerId = _loan!.LedgerId,
+                Name = $"{_loan.Name} extra payment",
                 PayeeId = _loan.LenderId,
                 CategoryId = categoryId,
                 LoanId = _loan.Id,
@@ -372,7 +380,7 @@ else
                 StartDate = today
             };
 
-        var parameters = new DialogParameters<BillDialog> { { d => d.Model, bill } };
+        var parameters = new DialogParameters<BillDialog> { { d => d.Model, bill }, { d => d.LedgerFixed, true } };
         var title = kind == LoanPaymentKind.MonthlyPayment ? "Monthly payment bill" : "Scheduled extra payment";
         var dialog = await Dialogs.ShowAsync<BillDialog>(title, parameters, new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true });
         if (await dialog.Result is { Canceled: false })

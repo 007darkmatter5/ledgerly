@@ -639,14 +639,14 @@ public sealed class LedgerServiceTests : IAsyncLifetime
     // Sharing
 
     /// <summary>Alice's ledger with a checking account and a rent bill, shared with and accepted by Bob.</summary>
-    private async Task<(Account Checking, Bill Rent)> AliceSharesWithBobAsync()
+    private async Task<(Account Checking, Bill Rent)> AliceSharesWithBobAsync(LedgerRole role = LedgerRole.Viewer)
     {
         var alice = ServiceFor("alice");
         var checking = Checking("Alice checking");
         await alice.SaveAccountAsync(checking);
         var rent = new Bill { Name = "Alice rent", ExpectedAmount = 900m, StartDate = new DateOnly(2026, 9, 1), PayFromAccountId = checking.Id };
         await alice.SaveBillAsync(rent);
-        await alice.ShareAsync("bob@example.com");
+        await alice.ShareAsync("bob@example.com", role);
 
         var bob = ServiceFor("bob");
         await bob.RespondToInvitationAsync(Assert.Single(await bob.GetInvitationsAsync()).MemberId, accept: true);
@@ -693,20 +693,26 @@ public sealed class LedgerServiceTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task A_shared_ledger_is_read_only()
+    public async Task A_view_only_share_is_read_only()
     {
         var (aliceChecking, rent) = await AliceSharesWithBobAsync();
         var bob = ServiceFor("bob");
         var bobChecking = Checking("Bob checking");
         await bob.SaveAccountAsync(bobChecking);
+        var aliceLedger = Assert.Single((await bob.GetScopeAsync()).Shared).LedgerId;
 
         var hijack = rent.Copy();
         hijack.ExpectedAmount = 1m;
-        await Assert.ThrowsAsync<InvalidOperationException>(() => bob.SaveBillAsync(hijack));
-        await Assert.ThrowsAsync<InvalidOperationException>(() => bob.RecordOccurrenceAsync(rent.Id, new DateOnly(2026, 9, 1), 1m, new DateOnly(2026, 9, 1)));
+        await Assert.ThrowsAsync<LedgerValidationException>(() => bob.SaveBillAsync(hijack));
+        await Assert.ThrowsAsync<LedgerValidationException>(() => bob.RecordOccurrenceAsync(rent.Id, new DateOnly(2026, 9, 1), 1m, new DateOnly(2026, 9, 1)));
         await Assert.ThrowsAsync<InvalidOperationException>(() => bob.MarkPaidAsync([(rent.Id, new DateOnly(2026, 9, 1))]));
-        await bob.DeleteBillAsync(rent.Id);
-        await bob.DeleteAccountAsync(aliceChecking.Id);
+        await Assert.ThrowsAsync<LedgerValidationException>(() => bob.DeleteBillAsync(rent.Id));
+        await Assert.ThrowsAsync<LedgerValidationException>(() => bob.DeleteAccountAsync(aliceChecking.Id));
+        await Assert.ThrowsAsync<LedgerValidationException>(() => bob.SaveTransactionAsync(new Transaction
+        {
+            LedgerId = aliceLedger, Description = "Dinner", Amount = 5m, Date = new DateOnly(2026, 9, 5), AccountId = aliceChecking.Id
+        }));
+        await Assert.ThrowsAsync<LedgerValidationException>(() => bob.SavePayeeAsync(new Payee { LedgerId = aliceLedger, Name = "Diner" }));
 
         // Seeing Alice's account doesn't let Bob point his own things at it.
         await Assert.ThrowsAsync<InvalidOperationException>(() => bob.SaveBillAsync(
@@ -718,6 +724,120 @@ public sealed class LedgerServiceTests : IAsyncLifetime
         var bill = Assert.Single(await alice.GetBillsAsync());
         Assert.Equal((900m, 0), (bill.ExpectedAmount, bill.Occurrences.Count));
         Assert.Single(await alice.GetAccountsAsync());
+        Assert.Empty(await alice.GetTransactionsAsync());
+        Assert.Empty(await alice.GetPayeesAsync());
+    }
+
+    [Fact]
+    public async Task A_contributor_can_add_transactions_and_record_payments_but_not_change_the_setup()
+    {
+        var (aliceChecking, rent) = await AliceSharesWithBobAsync(LedgerRole.Contributor);
+        var bob = ServiceFor("bob");
+        var bobChecking = Checking("Bob checking");
+        await bob.SaveAccountAsync(bobChecking);
+        var aliceLedger = Assert.Single((await bob.GetScopeAsync()).Shared).LedgerId;
+        var alice = ServiceFor("alice");
+        var aliceGroceries = new Category { Name = "Groceries" };
+        await alice.SaveCategoryAsync(aliceGroceries);
+
+        // Pickers for Alice's ledger offer her accounts and categories.
+        Assert.Equal(["Alice checking"], (await bob.GetAccountsAsync(ledgerId: aliceLedger)).Select(a => a.Name));
+        Assert.Equal(["Groceries"], (await bob.GetCategoriesAsync(ledgerId: aliceLedger)).Select(c => c.Name));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => ServiceFor("carol").GetAccountsAsync(ledgerId: aliceLedger));
+
+        // A transaction paid from Alice's account, with a payee Bob adds on the way, goes in Alice's ledger.
+        var diner = new Payee { LedgerId = aliceLedger, Name = "Diner" };
+        await bob.SavePayeeAsync(diner);
+        var dinner = new Transaction
+        {
+            LedgerId = aliceLedger, Description = "Dinner out", Amount = 60m, Date = new DateOnly(2026, 9, 5),
+            AccountId = aliceChecking.Id, CategoryId = aliceGroceries.Id, PayeeId = diner.Id
+        };
+        await bob.SaveTransactionAsync(dinner);
+        Assert.Equal(aliceLedger, dinner.LedgerId);
+        Assert.Equal(["Dinner out"], (await alice.GetTransactionsAsync()).Select(t => t.Description));
+        Assert.Equal(["Diner"], (await alice.GetPayeesAsync()).Select(p => p.Name));
+
+        // He can change or delete it, but can't move it into his own ledger by editing.
+        var edit = dinner.Copy();
+        (edit.LedgerId, edit.Amount) = (0, 65m);
+        await bob.SaveTransactionAsync(edit);
+        Assert.Equal((aliceLedger, 65m), (edit.LedgerId, Assert.Single(await alice.GetTransactionsAsync()).Amount));
+
+        // Nothing can mix the two ledgers.
+        await Assert.ThrowsAsync<InvalidOperationException>(() => bob.SaveTransactionAsync(new Transaction
+        {
+            LedgerId = aliceLedger, Description = "Mixed", Amount = 1m, Date = new DateOnly(2026, 9, 5), AccountId = bobChecking.Id
+        }));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => bob.SaveTransactionAsync(new Transaction
+        {
+            Description = "Mixed", Amount = 1m, Date = new DateOnly(2026, 9, 5), AccountId = bobChecking.Id, CategoryId = aliceGroceries.Id
+        }));
+
+        // Recording payments is allowed.
+        await bob.RecordOccurrenceAsync(rent.Id, new DateOnly(2026, 9, 1), 910m, new DateOnly(2026, 9, 2));
+        await bob.MarkPaidAsync([(rent.Id, new DateOnly(2026, 10, 1))]);
+        Assert.Equal(2, Assert.Single(await alice.GetBillsAsync()).Occurrences.Count(o => o.PaidOn is not null));
+
+        // Changing the setup isn't.
+        var hijack = rent.Copy();
+        hijack.ExpectedAmount = 1m;
+        await Assert.ThrowsAsync<LedgerValidationException>(() => bob.SaveBillAsync(hijack));
+        await Assert.ThrowsAsync<LedgerValidationException>(() => bob.DeleteAccountAsync(aliceChecking.Id));
+        await Assert.ThrowsAsync<LedgerValidationException>(() => bob.SaveAccountAsync(new Account { LedgerId = aliceLedger, Name = "Bob's idea", BalanceAsOf = new DateOnly(2026, 9, 1) }));
+        var rename = diner.Copy();
+        rename.Name = "Fancy diner";
+        await Assert.ThrowsAsync<LedgerValidationException>(() => bob.SavePayeeAsync(rename));
+        await Assert.ThrowsAsync<LedgerValidationException>(() => bob.DeleteCategoryAsync(aliceGroceries.Id));
+
+        await bob.DeleteTransactionAsync(dinner.Id);
+        Assert.Empty(await alice.GetTransactionsAsync());
+
+        // Switched off, the ledger can't be written to either.
+        await bob.SetSharedVisibleAsync(null, false);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => bob.SaveTransactionAsync(new Transaction
+        {
+            LedgerId = aliceLedger, Description = "Hidden", Amount = 1m, Date = new DateOnly(2026, 9, 5), AccountId = aliceChecking.Id
+        }));
+    }
+
+    [Fact]
+    public async Task An_editor_can_change_anything_in_the_shared_ledger_and_a_new_role_applies_at_once()
+    {
+        var (aliceChecking, rent) = await AliceSharesWithBobAsync(LedgerRole.Editor);
+        var bob = ServiceFor("bob");
+        var alice = ServiceFor("alice");
+        var aliceLedger = Assert.Single((await bob.GetScopeAsync()).Shared).LedgerId;
+
+        var savings = new Account { LedgerId = aliceLedger, Name = "Joint savings", Type = AccountType.Savings, BalanceAsOf = new DateOnly(2026, 9, 1) };
+        await bob.SaveAccountAsync(savings);
+        await bob.SaveTransferAsync(new Transfer
+        {
+            LedgerId = aliceLedger, Name = "Save", Amount = 100m, StartDate = new DateOnly(2026, 9, 5), FromAccountId = aliceChecking.Id, ToAccountId = savings.Id
+        });
+        var edit = rent.Copy();
+        edit.ExpectedAmount = 950m;
+        await bob.SaveBillAsync(edit);
+
+        Assert.Equal(["Alice checking", "Joint savings"], (await alice.GetAccountsAsync()).Select(a => a.Name));
+        Assert.Single(await alice.GetTransfersAsync());
+        Assert.Equal(950m, Assert.Single(await alice.GetBillsAsync()).ExpectedAmount);
+        Assert.Empty(await bob.GetAccountsAsync());
+
+        // Only Alice decides who it's shared with, and a lower role takes effect straight away.
+        var memberId = Assert.Single(await alice.GetSharesAsync()).MemberId;
+        await bob.SetShareRoleAsync(memberId, LedgerRole.Editor);
+        var notified = new List<string>();
+        _notifier.Changed += notified.Add;
+        await alice.SetShareRoleAsync(memberId, LedgerRole.Viewer);
+        Assert.Equal(["bob"], notified);
+        Assert.Equal(LedgerRole.Viewer, Assert.Single(await alice.GetSharesAsync()).Role);
+        await Assert.ThrowsAsync<LedgerValidationException>(() => bob.DeleteBillAsync(rent.Id));
+        Assert.Single(await alice.GetBillsAsync());
+
+        // Someone it isn't shared with can't name the ledger either.
+        await Assert.ThrowsAsync<InvalidOperationException>(() => ServiceFor("carol").SaveAccountAsync(
+            new Account { LedgerId = aliceLedger, Name = "Carol's", BalanceAsOf = new DateOnly(2026, 9, 1) }));
     }
 
     [Fact]

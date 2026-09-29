@@ -206,6 +206,37 @@ try {
     if (opened) { note('FAIL: a shared transaction opened for editing'); failed = true; }
   }
 
+  // The owner lets them add transactions. The quick-add then offers the shared ledger, and a transaction added there
+  // is paid from the owner's account and shows up in the owner's own ledger.
+  await page.locator('.share-row', { hasText: 'e2e-partner@example.com' }).locator('.mud-select .mud-input-control').click();
+  await page.locator('.mud-popover-open .mud-list-item', { hasText: 'Can add transactions' }).click();
+  await page.waitForSelector('text=can add transactions now', { timeout: 10000 });
+  await other.goto(`${base}/transactions`);
+  await other.waitForTimeout(2000);
+  let partnerAddOpened = false;
+  for (let attempt = 0; attempt < 10 && !partnerAddOpened; attempt++) {
+    await other.click('button[aria-label="Add a transaction"]');
+    partnerAddOpened = await other.waitForSelector('.mud-dialog input', { timeout: 3000 }).then(() => true, () => false);
+  }
+  if (!partnerAddOpened) throw new Error('the app bar button did not open the transaction dialog for the other user');
+  const partnerDialog = other.locator('.mud-dialog');
+  await partnerDialog.locator('.mud-select .mud-input-control', { hasText: 'Ledger' }).click();
+  await other.locator('.mud-popover-open .mud-list-item', { hasText: "e2e's ledger" }).click();
+  // The account defaults to the owner's checking account (a select shows its value in an input, not as text).
+  await other.waitForFunction(() => [...document.querySelectorAll('.mud-dialog input')].some((i) => i.value === 'E2E Checking'), null, { timeout: 5000 });
+  await partnerDialog.getByLabel('Amount').fill('18.25');
+  await partnerDialog.getByLabel('What was it for?').fill('E2E Partner lunch');
+  await partnerDialog.getByRole('button', { name: 'Save', exact: true }).click();
+  const partnerTagged = await other.locator('.mud-table-body tr', { hasText: 'E2E Partner lunch' }).locator('.ledger-tag')
+    .waitFor({ timeout: 5000 }).then(() => true, () => false);
+  note(`other user added a transaction to the shared ledger: ${partnerTagged}`);
+  if (!partnerTagged) { note(`FAIL: the transaction wasn't added to the shared ledger: ${await partnerDialog.allInnerTexts()}`); failed = true; }
+  await page.goto(`${base}/transactions`);
+  const ownerSees = await page.waitForSelector('.mud-table-body tr:has-text("E2E Partner lunch")', { timeout: 10000 }).then((h) => h, () => null);
+  const ownerText = ownerSees === null ? '' : await ownerSees.innerText();
+  note(`owner sees it on their own account: ${ownerText.includes('E2E Checking')}`);
+  if (!ownerText.includes('E2E Checking')) { note(`FAIL: the owner doesn't see the partner's transaction: ${ownerText}`); failed = true; }
+
   await other.click('button[aria-label="Ledgers"]');
   await other.click(".ledgers-menu >> text=e2e's ledger");
   const hidden = await other.waitForSelector('.mud-table-body tr:has-text("E2E Dinner out")', { state: 'detached', timeout: 10000 }).then(() => true, () => false);

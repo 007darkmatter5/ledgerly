@@ -2,6 +2,7 @@
 
 <MudDialog>
     <DialogContent>
+        <LedgerPicker @bind-Value="Model.LedgerId" Role="LedgerRole.Contributor" Fixed="Model.Id != 0 || LedgerFixed" />
         <MudTextField @bind-Value="Model.Name" Label="Name" MaxLength="50" Variant="Variant.Outlined" Margin="Margin.Dense" Immediate="true"
                       Error="@(_error is not null)" ErrorText="@_error" autofocus OnKeyUp="OnKeyUpAsync" />
 
@@ -35,6 +36,9 @@
 @code {
     [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = null!;
     [Parameter] public Category Model { get; set; } = new();
+
+    /// <summary>Added from another dialog, which already set the ledger in <see cref="Model"/>.</summary>
+    [Parameter] public bool LedgerFixed { get; set; }
 
     private string? _error;
     private bool _saving;

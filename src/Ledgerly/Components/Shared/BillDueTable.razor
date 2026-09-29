@@ -84,7 +84,7 @@
             }
         </MudTd>
         <MudTd Style="text-align:right; white-space:nowrap">
-            @if (!IsMine(context))
+            @if (!CanRecord(context))
             {
                 <MudTooltip Text="Shared with you, view only"><MudIcon Icon="@Icons.Material.Filled.Lock" Size="Size.Small" Class="mud-text-secondary" /></MudTooltip>
             }
@@ -115,8 +115,8 @@
 
     [CascadingParameter] public LedgerScope? Scope { get; set; }
 
-    /// <summary>In the user's own ledger, so it can be marked paid and edited.</summary>
-    private bool IsMine(BillDue due) => Scope?.IsHome(due.Bill.LedgerId) ?? true;
+    /// <summary>In the user's own ledger, or a shared one where they can record payments.</summary>
+    private bool CanRecord(BillDue due) => Scope?.CanContribute(due.Bill.LedgerId) ?? true;
 
     private string RowStyle(BillDue due, int _) => Scope?.RowStyle(due.Bill.LedgerId) ?? "";
 

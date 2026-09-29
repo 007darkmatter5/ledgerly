@@ -193,7 +193,7 @@
         <MudTd DataLabel="Paid from">@transaction.Account?.Name</MudTd>
         <MudTd DataLabel="Amount" Style="text-align:right; white-space:nowrap">@transaction.Amount.ToString("C")</MudTd>
         <MudTd Style="text-align:right; white-space:nowrap">
-            @if (Scope.IsHome(transaction.LedgerId))
+            @if (Scope.CanContribute(transaction.LedgerId))
             {
                 <MudTooltip Text="Edit or delete the transaction">
                     <MudIconButton Icon="@Icons.Material.Filled.EditNote" Size="Size.Small" OnClick="() => EditTransactionAsync(transaction)" aria-label="@($"Edit {transaction.Description}")" />
@@ -241,7 +241,7 @@
                         }
                     </MudTd>
                     <MudTd Style="text-align:right; white-space:nowrap">
-                        @if (Scope.IsHome(context.Bill.LedgerId))
+                        @if (Scope.CanContribute(context.Bill.LedgerId))
                         {
                             <MudTooltip Text="@(context.IsAssumed ? "Mark paid" : "Change amount, date or notes, or mark unpaid")">
                                 <MudIconButton Icon="@Icons.Material.Filled.EditNote" Size="Size.Small" OnClick="() => OpenAsync(context.Due, markPaid: context.IsAssumed)" aria-label="@($"Edit payment for {context.Bill.Name}")" />
@@ -352,8 +352,8 @@
             && NameFilter.Matches(b.Payee, _payeeFilter, _payees)).ToList();
 
         _history = PaymentHistory.Between(bills, From, To, Today, _includeAutopay);
-        // Marking paid is for the user's own bills; shared ones show in the history only.
-        var mine = bills.Where(b => Scope.IsHome(b.LedgerId)).ToList();
+        // Marking paid is for bills the user can record payments for; the rest show in the history only.
+        var mine = bills.Where(b => Scope.CanContribute(b.LedgerId)).ToList();
         _notMarked = PaymentHistory.NotMarkedPaid(mine, From, To, Today);
         _comingUp = PaymentHistory.ComingUp(mine, From, To, Today);
 

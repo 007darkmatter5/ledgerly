@@ -68,7 +68,7 @@
                 <MudTd DataLabel="To">@context.ToAccount?.Name</MudTd>
                 <MudTd DataLabel="Per month" Style="text-align:right">@Recurrence.MonthlyEquivalent(context.Frequency, context.Amount).ToString("C")</MudTd>
                 <MudTd Style="text-align:right; white-space:nowrap">
-                    @if (Scope.IsHome(context.LedgerId))
+                    @if (Scope.CanEdit(context.LedgerId))
                     {
                         <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="() => EditAsync(context)" aria-label="Edit" />
                         <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="() => DeleteAsync(context)" aria-label="Delete" />
@@ -140,7 +140,7 @@
                     }
                 </MudTd>
                 <MudTd Style="text-align:right; white-space:nowrap">
-                    @if (Scope.IsHome(context.Transfer.LedgerId))
+                    @if (Scope.CanContribute(context.Transfer.LedgerId))
                     {
                         <MudButton Size="Size.Small" OnClick="() => RecordAsync(context)">@(context.IsDone ? "Edit" : "Record")</MudButton>
                     }
@@ -185,8 +185,8 @@
     private async Task LoadAsync()
     {
         _transfers = await Ledger.GetTransfersAsync(includeShared: true);
-        // Only the user's own transfers are theirs to record.
-        _missed = TransferSchedule.Between(_transfers.Where(t => Scope.IsHome(t.LedgerId)), Ledger.Today.AddDays(-90), Ledger.Today.AddDays(-1))
+        // Only transfers the user can record count as theirs to catch up on.
+        _missed = TransferSchedule.Between(_transfers.Where(t => Scope.CanContribute(t.LedgerId)), Ledger.Today.AddDays(-90), Ledger.Today.AddDays(-1))
             .Where(d => d.IsMissed(Ledger.Today))
             .ToList();
         _loading = false;

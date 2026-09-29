@@ -1,0 +1,63 @@
+@* Which ledger an item goes in. For a new item it offers the user's own ledger and the shared ledgers (switched on)
+   where their role is at least Role, and renders nothing when that's the only choice. For an existing item (Fixed)
+   it can't change; it just names the shared ledger the item is in. Dialogs reload their pickers on ValueChanged,
+   because everything an item refers to has to be in its ledger. Value 0 means the user's own ledger. *@
+@inject LedgerService Ledger
+
+@if (_scope is null)
+{
+    return;
+}
+@if (Fixed)
+{
+    @if (_scope.SharedFor(Value) is { } shared)
+    {
+        <div class="ledger-note mb-3" style="@($"--ledger-color:{shared.Color}")">
+            <MudIcon Icon="@Icons.Material.Filled.People" Size="Size.Small" />
+            <span>In <strong>@shared.Name</strong>, shared by @shared.OwnerName</span>
+        </div>
+    }
+}
+else if (_choices.Count > 0)
+{
+    <MudSelect T="int" Value="Current" ValueChanged="OnChangedAsync" Label="Ledger" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mb-3"
+               HelperText="@HelperText" ToStringFunc="NameOf">
+        <MudSelectItem T="int" Value="_scope.HomeLedgerId">My ledger</MudSelectItem>
+        @foreach (var shared in _choices)
+        {
+            <MudSelectItem T="int" Value="shared.LedgerId">
+                <span class="d-inline-flex align-center gap-2">
+                    <span class="ledger-dot" style="@($"background:{shared.Color}")"></span>@shared.Name
+                </span>
+            </MudSelectItem>
+        }
+    </MudSelect>
+}
+
+@code {
+    [Parameter] public int Value { get; set; }
+    [Parameter] public EventCallback<int> ValueChanged { get; set; }
+
+    /// <summary>The role needed to add this kind of item.</summary>
+    [Parameter] public LedgerRole Role { get; set; } = LedgerRole.Editor;
+
+    /// <summary>The item already exists (or its ledger was chosen elsewhere), so it can't move.</summary>
+    [Parameter] public bool Fixed { get; set; }
+
+    [Parameter] public string? HelperText { get; set; }
+
+    private LedgerScope? _scope;
+    private List<SharedLedger> _choices = [];
+
+    private int Current => Value == 0 ? _scope?.HomeLedgerId ?? 0 : Value;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _scope = await Ledger.GetScopeAsync();
+        _choices = _scope.WritableShared(Role).ToList();
+    }
+
+    private string NameOf(int ledgerId) => _scope?.SharedFor(ledgerId)?.Name ?? "My ledger";
+
+    private Task OnChangedAsync(int ledgerId) => ValueChanged.InvokeAsync(ledgerId);
+}

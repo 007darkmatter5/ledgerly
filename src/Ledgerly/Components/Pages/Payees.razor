@@ -15,7 +15,7 @@
 </MudStack>
 
 <MudPaper Elevation="1">
-    <MudTable Items="_rows" Hover="true" Loading="_loading" Breakpoint="Breakpoint.Sm" Elevation="0">
+    <MudTable Items="_rows" Hover="true" Loading="_loading" Breakpoint="Breakpoint.Sm" Elevation="0" RowStyleFunc="RowStyle">
         <HeaderContent>
             <MudTh>Payee</MudTh>
             <MudTh>Website</MudTh>
@@ -26,7 +26,7 @@
         </HeaderContent>
         <RowTemplate>
             <MudTd DataLabel="Payee">
-                <MudText Typo="Typo.body1">@context.Payee.Name</MudText>
+                <MudText Typo="Typo.body1">@context.Payee.Name<LedgerTag LedgerId="context.Payee.LedgerId" /></MudText>
                 @if (!string.IsNullOrWhiteSpace(context.Payee.Notes))
                 {
                     <MudText Typo="Typo.caption" Class="mud-text-secondary" Style="white-space:pre-line">@context.Payee.Notes</MudText>
@@ -68,8 +68,11 @@
             </MudTd>
             <MudTd DataLabel="Per month" Style="text-align:right">@context.Monthly.ToString("C")</MudTd>
             <MudTd Style="text-align:right; white-space:nowrap">
-                <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="() => EditAsync(context.Payee)" aria-label="@($"Edit {context.Payee.Name}")" />
-                <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="() => DeleteAsync(context)" aria-label="@($"Delete {context.Payee.Name}")" />
+                @if (Scope.CanEdit(context.Payee.LedgerId))
+                {
+                    <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="() => EditAsync(context.Payee)" aria-label="@($"Edit {context.Payee.Name}")" />
+                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="() => DeleteAsync(context)" aria-label="@($"Delete {context.Payee.Name}")" />
+                }
             </MudTd>
         </RowTemplate>
         <NoRecordsContent>
@@ -87,17 +90,22 @@
 @code {
     private record Row(Payee Payee, int BillCount, List<Loan> Loans, decimal Monthly);
 
+    [CascadingParameter] private LedgerScope Scope { get; set; } = LedgerScope.None;
+
     private bool _loading = true;
     private List<Row> _rows = [];
     private int _billsWithoutPayee;
 
+    private string RowStyle(Row row, int _) => Scope.RowStyle(row.Payee.LedgerId);
+
     protected override Task OnInitializedAsync() => LoadAsync();
 
+    /// <summary>The user's payees first, then those of shared ledgers that are switched on.</summary>
     private async Task LoadAsync()
     {
-        var payees = await Ledger.GetPayeesAsync();
-        var bills = await Ledger.GetBillsAsync();
-        var loans = await Ledger.GetLoansAsync();
+        var payees = (await Ledger.GetPayeesAsync(includeShared: true)).OrderBy(p => !Scope.IsHome(p.LedgerId)).ToList();
+        var bills = await Ledger.GetBillsAsync(includeShared: true);
+        var loans = await Ledger.GetLoansAsync(includeShared: true);
 
         _rows = payees.Select(p =>
         {

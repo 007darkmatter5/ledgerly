@@ -49,7 +49,7 @@
             <MudTd DataLabel="Deposited to">@context.DepositToAccount?.Name</MudTd>
             <MudTd DataLabel="Per month" Style="text-align:right">@Recurrence.MonthlyEquivalent(context.Frequency, context.Amount).ToString("C")</MudTd>
             <MudTd Style="text-align:right; white-space:nowrap">
-                @if (Scope.IsHome(context.LedgerId))
+                @if (Scope.CanEdit(context.LedgerId))
                 {
                     <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="() => EditAsync(context)" aria-label="Edit" />
                     <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="() => DeleteAsync(context)" aria-label="Delete" />

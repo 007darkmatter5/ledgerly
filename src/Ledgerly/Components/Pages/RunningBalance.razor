@@ -127,7 +127,7 @@ else if (belowThreshold is not null)
                              Color="@(context.IsMoneyIn && !context.IsTransfer ? Color.Success : Color.Default)" Size="Size.Small" />
                     <span>@context.Description</span>
                     <LedgerTag LedgerId="LedgerOf(context.AccountId)" />
-                    @if (context.Transaction is { } transaction && Scope.IsHome(transaction.LedgerId))
+                    @if (context.Transaction is { } transaction && Scope.CanContribute(transaction.LedgerId))
                     {
                         <MudTooltip Text="A one-off transaction. Click to edit it.">
                             <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" OnClick="() => EditTransactionAsync(transaction)">Transaction</MudChip>
@@ -210,7 +210,7 @@ else if (belowThreshold is not null)
         _incomes = await Ledger.GetIncomesAsync(includeShared: true);
         _transfers = await Ledger.GetTransfersAsync(includeShared: true);
         _transactions = await Ledger.GetTransactionsAsync(includeShared: true);
-        _unassignedBills = _bills.Count(b => b.IsActive && b.PayFromAccountId is null && Scope.IsHome(b.LedgerId));
+        _unassignedBills = _bills.Count(b => b.IsActive && b.PayFromAccountId is null && Scope.CanEdit(b.LedgerId));
 
         var ledger = await Ledger.GetActiveLedgerAsync();
         _days = DayOptions.Contains(ledger.ProjectionDays ?? 0) ? ledger.ProjectionDays!.Value : 60;

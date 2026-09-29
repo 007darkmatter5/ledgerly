@@ -79,7 +79,10 @@ public enum LedgerRole
     /// <summary>See everything, change nothing.</summary>
     Viewer,
 
-    /// <summary>Also mark bills paid, record amounts, and add or edit transactions.</summary>
+    /// <summary>
+    /// Also mark bills paid, record amounts and transfers, add or edit transactions, and add categories and payees
+    /// (to use on transactions).
+    /// </summary>
     Contributor,
 
     /// <summary>Change anything in the ledger, except who it's shared with.</summary>

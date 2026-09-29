@@ -94,7 +94,7 @@
                 }
             </MudTd>
             <MudTd Style="text-align:right; white-space:nowrap">
-                @if (Scope.IsHome(context.LedgerId))
+                @if (Scope.CanEdit(context.LedgerId))
                 {
                     <span @onclick:stopPropagation="true">
                         <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="() => EditAsync(context)" aria-label="Edit" />

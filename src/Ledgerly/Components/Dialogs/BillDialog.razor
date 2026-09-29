@@ -3,13 +3,14 @@
 
 <MudDialog>
     <DialogContent>
+        <LedgerPicker Value="Model.LedgerId" ValueChanged="OnLedgerChangedAsync" Fixed="Model.Id != 0 || LedgerFixed" />
         <MudForm @ref="_form">
             <MudGrid Spacing="2">
                 <MudItem xs="12" sm="6">
                     <MudTextField @bind-Value="Model.Name" Label="Bill name" Required="true" RequiredError="Name is required" MaxLength="100" Variant="Variant.Outlined" Margin="Margin.Dense" />
                 </MudItem>
                 <MudItem xs="12" sm="3">
-                    <PayeePicker @bind-Value="Model.PayeeId" />
+                    <PayeePicker @bind-Value="Model.PayeeId" LedgerId="Model.LedgerId" />
                 </MudItem>
                 <MudItem xs="12" sm="3">
                     <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center">
@@ -163,6 +164,9 @@
     /// <summary>Prefills the first due date, e.g. when setting up a card's payment from the card page.</summary>
     [Parameter] public DateOnly? SuggestedStartDate { get; set; }
 
+    /// <summary>Set up from a card or loan, which already put the bill in its ledger.</summary>
+    [Parameter] public bool LedgerFixed { get; set; }
+
     private bool IsCardPayment => Model.CardAccountId is not null;
 
     private string PaysOff => Model.LoanId is { } loanId ? $"loan:{loanId}" : Model.CardAccountId is { } cardId ? $"card:{cardId}" : "";
@@ -171,13 +175,26 @@
     {
         _startDate = Model.Id == 0 ? SuggestedStartDate : Model.StartDate;
         _endDate = Model.EndDate;
-        _categories = await Ledger.GetCategoriesAsync();
-        _accounts = await Ledger.GetAccountsAsync(activeOnly: true);
-        _cards = (await Ledger.GetAccountsAsync()).Where(a => a.IsCreditCard && (a.IsActive || a.Id == Model.CardAccountId)).ToList();
-        _loans = (await Ledger.GetLoansAsync()).Where(l => l.IsActive || l.Id == Model.LoanId).ToList();
+        await LoadChoicesAsync();
+    }
+
+    /// <summary>Accounts, cards, loans and categories of the bill's ledger: it can't refer to another ledger's.</summary>
+    private async Task LoadChoicesAsync()
+    {
+        _categories = await Ledger.GetCategoriesAsync(ledgerId: Model.LedgerId);
+        _accounts = await Ledger.GetAccountsAsync(activeOnly: true, ledgerId: Model.LedgerId);
+        _cards = (await Ledger.GetAccountsAsync(ledgerId: Model.LedgerId)).Where(a => a.IsCreditCard && (a.IsActive || a.Id == Model.CardAccountId)).ToList();
+        _loans = (await Ledger.GetLoansAsync(ledgerId: Model.LedgerId)).Where(l => l.IsActive || l.Id == Model.LoanId).ToList();
 
         if (Model.Id == 0 && Model.PayFromAccountId is null && _accounts.FirstOrDefault(a => a.Type == AccountType.Checking) is { } checking)
             Model.PayFromAccountId = checking.Id;
+    }
+
+    private async Task OnLedgerChangedAsync(int ledgerId)
+    {
+        Model.LedgerId = ledgerId;
+        (Model.PayFromAccountId, Model.CardAccountId, Model.LoanId, Model.CategoryId, Model.PayeeId) = (null, null, null, null, null);
+        await LoadChoicesAsync();
     }
 
     private string DescribePaysOff(string? value) => value switch
@@ -214,12 +231,13 @@
     {
         var parameters = new DialogParameters<CategoryDialog>
         {
-            { d => d.Model, new Category { Color = CategoryChip.Palette[_categories.Count % CategoryChip.Palette.Length] } }
+            { d => d.Model, new Category { LedgerId = Model.LedgerId, Color = CategoryChip.Palette[_categories.Count % CategoryChip.Palette.Length] } },
+            { d => d.LedgerFixed, true }
         };
         var dialog = await Dialogs.ShowAsync<CategoryDialog>("New category", parameters, new DialogOptions { MaxWidth = MaxWidth.ExtraSmall, FullWidth = true });
         if (await dialog.Result is { Canceled: false, Data: int id })
         {
-            _categories = await Ledger.GetCategoriesAsync();
+            _categories = await Ledger.GetCategoriesAsync(ledgerId: Model.LedgerId);
             Model.CategoryId = id;
         }
     }

@@ -10,6 +10,9 @@ public sealed record SharedLedger(int MemberId, int LedgerId, string? Nickname, 
     public string Name => Nickname ?? DefaultName;
 
     public bool IsReadOnly => Role == LedgerRole.Viewer;
+
+    /// <summary>"view only", "can add transactions" or "can edit", for labels and tooltips.</summary>
+    public string AccessText => LedgerScope.AccessText(Role);
 }
 
 /// <summary>
@@ -37,8 +40,33 @@ public sealed class LedgerScope
     /// <summary>The shared ledger a row belongs to, or null for the user's own.</summary>
     public SharedLedger? SharedFor(int ledgerId) => IsHome(ledgerId) ? null : Shared.FirstOrDefault(s => s.LedgerId == ledgerId);
 
+    /// <summary>
+    /// What the user may do in a ledger: everything in their home ledger, their role in a shared one that's switched on,
+    /// and nothing anywhere else (including shared ledgers that are switched off).
+    /// </summary>
+    public LedgerRole? RoleIn(int ledgerId) =>
+        IsHome(ledgerId) ? LedgerRole.Editor : Visible.FirstOrDefault(s => s.LedgerId == ledgerId)?.Role;
+
+    public bool Can(int ledgerId, LedgerRole role) => RoleIn(ledgerId) >= role;
+
+    /// <summary>Add, change and delete anything (accounts, bills, income, transfers, loans, categories, payees).</summary>
+    public bool CanEdit(int ledgerId) => Can(ledgerId, LedgerRole.Editor);
+
+    /// <summary>Record payments and transfers, and add or edit transactions.</summary>
+    public bool CanContribute(int ledgerId) => Can(ledgerId, LedgerRole.Contributor);
+
+    /// <summary>Shared ledgers (switched on) the user can add things to with at least <paramref name="role"/>.</summary>
+    public IEnumerable<SharedLedger> WritableShared(LedgerRole role) => Visible.Where(s => s.Role >= role);
+
     /// <summary>A colored bar down the left edge of a table row from a shared ledger.</summary>
     public string RowStyle(int ledgerId) => SharedFor(ledgerId) is { } shared ? $"box-shadow: inset 4px 0 0 {shared.Color}" : "";
+
+    public static string AccessText(LedgerRole role) => role switch
+    {
+        LedgerRole.Editor => "can edit",
+        LedgerRole.Contributor => "can add transactions",
+        _ => "view only"
+    };
 }
 
 /// <summary>A pending invitation for the signed-in user.</summary>

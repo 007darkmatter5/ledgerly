@@ -244,10 +244,10 @@ else
             .ToList();
 
         _upcoming30 = BillSchedule.Between(bills, today, today.AddDays(30)).ToList();
-        // Overdue and unassigned bills are things to act on, so only the user's own count.
-        var mine = bills.Where(b => Scope.IsHome(b.LedgerId)).ToList();
+        // Overdue and unassigned bills are things to act on, so only those the user can act on count.
+        var mine = bills.Where(b => Scope.CanContribute(b.LedgerId)).ToList();
         _overdue = BillSchedule.Between(mine, today.AddDays(-90), today.AddDays(-1)).Where(d => d.IsOverdue(today)).ToList();
-        _unassignedBills = mine.Count(b => b.IsActive && b.PayFromAccountId is null);
+        _unassignedBills = bills.Count(b => Scope.CanEdit(b.LedgerId) && b.IsActive && b.PayFromAccountId is null);
         _loading = false;
     }
 

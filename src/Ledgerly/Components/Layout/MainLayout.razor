@@ -67,9 +67,9 @@
                         {
                             @* A plain button rather than MudMenuItem, whose wrapper indents the row and won't let long names shrink. *@
                             <button type="button" class="ledgers-menu-row ledgers-menu-toggle" style="@($"--ledger-color:{shared.Color}")"
-                                    title="@($"{shared.Name}, shared by {shared.OwnerName}{(shared.IsReadOnly ? ", view only" : "")}")"
+                                    title="@($"{shared.Name}, shared by {shared.OwnerName}, {shared.AccessText}")"
                                     role="checkbox" aria-checked="@(shared.IsVisible ? "true" : "false")"
-                                    aria-label="@($"{shared.Name}, shared by {shared.OwnerName}{(shared.IsReadOnly ? ", view only" : "")}")"
+                                    aria-label="@($"{shared.Name}, shared by {shared.OwnerName}, {shared.AccessText}")"
                                     @onclick="() => SetVisibleAsync(shared.MemberId, !shared.IsVisible)">
                                 <MudIcon Icon="@(shared.IsVisible ? Icons.Material.Filled.CheckBox : Icons.Material.Filled.CheckBoxOutlineBlank)" Class="ledger-check" />
                                 <span class="ledgers-menu-text">
@@ -94,7 +94,7 @@
                     {
                         <MudDivider />
                         <div class="px-4 py-2">
-                            <MudText Typo="Typo.body2"><strong>@invitation.OwnerName</strong> wants to share their ledger with you (view only).</MudText>
+                            <MudText Typo="Typo.body2"><strong>@invitation.OwnerName</strong> wants to share their ledger with you (@LedgerScope.AccessText(invitation.Role)).</MudText>
                             <div class="d-flex gap-2 mt-1">
                                 <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary" OnClick="() => RespondAsync(invitation, true)">Accept</MudButton>
                                 <MudButton Size="Size.Small" OnClick="() => RespondAsync(invitation, false)">Decline</MudButton>
@@ -288,9 +288,15 @@
     {
         foreach (var invitation in _invitations.Where(i => _prompted.Add(i.MemberId)).ToList())
         {
+            var access = invitation.Role switch
+            {
+                LedgerRole.Editor => "You can add and change anything in it, like accounts, bills and transactions.",
+                LedgerRole.Contributor => "You can add transactions and mark bills paid in it, but not change its accounts or bills.",
+                _ => "It's view only: you can't change anything in it."
+            };
             var answer = await Dialogs.ShowMessageBoxAsync($"{invitation.OwnerName} shared a ledger with you",
                 $"Accept to see {invitation.OwnerName}'s accounts, bills and payments alongside your own, marked in their own color. " +
-                "It's view only: you can't change anything in it. You can switch it off or leave it at any time.",
+                $"{access} You can switch it off or leave it at any time.",
                 yesText: "Accept", noText: "Decline", cancelText: "Later");
             if (answer is { } accept)
                 await RespondAsync(invitation, accept);

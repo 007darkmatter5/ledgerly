@@ -60,7 +60,7 @@
                 <MudTooltip Text="Running balance">
                     <MudIconButton Icon="@Icons.Material.Filled.ShowChart" Size="Size.Small" Href="@($"projection?accounts={context.Id}")" aria-label="Running balance" />
                 </MudTooltip>
-                @if (Scope.IsHome(context.LedgerId))
+                @if (Scope.CanEdit(context.LedgerId))
                 {
                     <MudTooltip Text="Update balance">
                         <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="() => EditAsync(context)" aria-label="Edit" />

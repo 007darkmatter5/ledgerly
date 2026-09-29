@@ -2,6 +2,7 @@
 
 <MudDialog>
     <DialogContent>
+        <LedgerPicker Value="Model.LedgerId" ValueChanged="OnLedgerChangedAsync" Fixed="Model.Id != 0" />
         @if (_accounts.Count < 2)
         {
             <MudAlert Severity="Severity.Info" Class="mb-3">Add at least two bank accounts first, so there's somewhere to move money from and to.</MudAlert>
@@ -89,9 +90,20 @@
     {
         _startDate = Model.Id == 0 ? null : Model.StartDate;
         _endDate = Model.EndDate;
+        await LoadAccountsAsync();
+    }
 
+    private async Task OnLedgerChangedAsync(int ledgerId)
+    {
+        (Model.LedgerId, Model.FromAccountId, Model.ToAccountId) = (ledgerId, 0, 0);
+        await LoadAccountsAsync();
+    }
+
+    /// <summary>Both ends must be in the transfer's ledger.</summary>
+    private async Task LoadAccountsAsync()
+    {
         // Credit cards are paid by a bill that pays the card, so their balance keeps following the card's own maths.
-        _accounts = (await Ledger.GetAccountsAsync())
+        _accounts = (await Ledger.GetAccountsAsync(ledgerId: Model.LedgerId))
             .Where(a => !a.IsCreditCard && (a.IsActive || a.Id == Model.FromAccountId || a.Id == Model.ToAccountId))
             .ToList();
 

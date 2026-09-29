@@ -1,4 +1,4 @@
-@* Choose a payee, or add a new one without leaving the form. *@
+@* Choose a payee from the item's ledger, or add a new one there without leaving the form. *@
 @inject LedgerService Ledger
 @inject IDialogService Dialogs
 
@@ -22,19 +22,29 @@
     [Parameter] public string Label { get; set; } = "Payee";
     [Parameter] public string? HelperText { get; set; }
 
-    private List<Payee> _payees = [];
+    /// <summary>The ledger of the item being edited (0: the user's own). Payees from other ledgers can't be used.</summary>
+    [Parameter] public int LedgerId { get; set; }
 
-    protected override async Task OnInitializedAsync() => _payees = await Ledger.GetPayeesAsync();
+    private List<Payee> _payees = [];
+    private int? _loadedFor;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_loadedFor == LedgerId)
+            return;
+        _loadedFor = LedgerId;
+        _payees = await Ledger.GetPayeesAsync(ledgerId: LedgerId);
+    }
 
     private Task OnValueChanged(int? id) => ValueChanged.InvokeAsync(id);
 
     private async Task AddAsync()
     {
-        var parameters = new DialogParameters<PayeeDialog> { { d => d.Model, new Payee() } };
+        var parameters = new DialogParameters<PayeeDialog> { { d => d.Model, new Payee { LedgerId = LedgerId } }, { d => d.LedgerFixed, true } };
         var dialog = await Dialogs.ShowAsync<PayeeDialog>($"New {Label.ToLowerInvariant()}", parameters, new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true });
         if (await dialog.Result is { Canceled: false, Data: int id })
         {
-            _payees = await Ledger.GetPayeesAsync();
+            _payees = await Ledger.GetPayeesAsync(ledgerId: LedgerId);
             await OnValueChanged(id);
         }
     }

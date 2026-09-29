@@ -128,7 +128,7 @@
                 </MudTd>
                 <MudTd DataLabel="Per month" Style="text-align:right">@Monthly(context).ToString("C")</MudTd>
                 <MudTd Style="text-align:right; white-space:nowrap">
-                    @if (Scope.IsHome(context.LedgerId))
+                    @if (Scope.CanEdit(context.LedgerId))
                     {
                         <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="() => EditAsync(context)" aria-label="Edit" />
                         <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="() => DeleteAsync(context)" aria-label="Delete" />
@@ -301,11 +301,15 @@
 
     private async Task EditAsync(Bill? bill)
     {
+        // Start from the filters, in the filtered account's ledger if the user can add bills there.
+        var account = _accounts.FirstOrDefault(a => a.Id == _accountFilter);
+        var ledgerId = account is not null && Scope.CanEdit(account.LedgerId) ? account.LedgerId : Scope.HomeLedgerId;
         var model = bill?.Copy() ?? new Bill
         {
-            PayFromAccountId = _accountFilter is > 0 ? _accountFilter : null,
-            CategoryId = CategoryFilter is > 0 ? CategoryFilter : null,
-            PayeeId = PayeeFilter is > 0 ? PayeeFilter : null
+            LedgerId = ledgerId,
+            PayFromAccountId = account?.LedgerId == ledgerId ? account.Id : null,
+            CategoryId = _categories.FirstOrDefault(c => c.Id == CategoryFilter)?.LedgerId == ledgerId ? CategoryFilter : null,
+            PayeeId = _payees.FirstOrDefault(p => p.Id == PayeeFilter)?.LedgerId == ledgerId ? PayeeFilter : null
         };
         var parameters = new DialogParameters<BillDialog> { { d => d.Model, model } };
         var dialog = await Dialogs.ShowAsync<BillDialog>(bill is null ? "Add bill" : "Edit bill", parameters,

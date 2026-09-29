@@ -233,7 +233,19 @@ button.cal-item:focus-visible { outline: 2px solid var(--mud-palette-primary); o
     color: var(--ledger-color); background: rgb(from var(--ledger-color) r g b / 0.14);
 }
 .ledger-dot { flex: none; width: 10px; height: 10px; border-radius: 50%; background: var(--ledger-color); }
+/* Sharing page: someone the ledger is shared with, and what they can do. */
+.share-row { padding: 8px 0 0 0; border-top: 1px solid var(--mud-palette-lines-default); }
+.share-row .share-role { margin-left: 28px; max-width: 280px; }
+
+/* In a dialog editing something from a shared ledger: which ledger it is. */
+.ledger-note {
+    display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 4px;
+    border-left: 4px solid var(--ledger-color); background: rgb(from var(--ledger-color) r g b / 0.10);
+    font-size: 0.875rem;
+}
+.ledger-note .mud-icon-root { color: var(--ledger-color); }
 .cal-item.shared { border-left: 4px solid var(--ledger-color); cursor: default; }
+.cal-item.shared.editable { cursor: pointer; }
 .cal-item.transaction {background: rgb(from var(--mud-palette-tertiary) r g b / 0.12); border: 1px dotted rgb(from var(--mud-palette-tertiary) r g b / 0.8); }
 .cal-item.transaction.received { color: var(--mud-palette-success); }
 

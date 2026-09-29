@@ -23,38 +23,51 @@
         <MudPaper Elevation="1" Class="pa-4 mb-3">
             <MudText Typo="Typo.h6">Share your ledger</MudText>
             <MudText Typo="Typo.body2" Class="mud-text-secondary mb-3">
-                They'll see your accounts, bills, income, transfers, transactions and loans, but can't change anything.
-                They're asked to accept first, and you can stop sharing at any time. Sample data is never shared.
+                They'll see your accounts, bills, income, transfers, transactions and loans, and can change as much as you allow.
+                They're asked to accept first, and you can change their access or stop sharing at any time. Sample data is never shared.
             </MudText>
             @if (_shareError is not null)
             {
                 <MudAlert Severity="Severity.Error" Dense="true" Class="mb-2">@_shareError</MudAlert>
             }
-            <MudStack Row="true" AlignItems="AlignItems.Start" Spacing="2">
+            <MudStack Row="true" AlignItems="AlignItems.Start" Spacing="2" Wrap="Wrap.Wrap">
                 <MudTextField @bind-Value="_email" Label="Their email address" InputType="InputType.Email" Variant="Variant.Outlined" Margin="Margin.Dense"
-                              HelperText="The email they sign in to Ledgerly with" OnKeyUp="@(e => e.Key == "Enter" ? ShareAsync() : Task.CompletedTask)" Immediate="true" />
+                              HelperText="The email they sign in to Ledgerly with" OnKeyUp="@(e => e.Key == "Enter" ? ShareAsync() : Task.CompletedTask)" Immediate="true"
+                              Style="min-width:220px" />
+                <MudSelect T="LedgerRole" @bind-Value="_role" Label="They can" Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:180px"
+                           HelperText="@RoleHelp(_role)" ToStringFunc="RoleName">
+                    @foreach (var role in Roles)
+                    {
+                        <MudSelectItem T="LedgerRole" Value="role">@RoleName(role)</MudSelectItem>
+                    }
+                </MudSelect>
                 <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Share" OnClick="ShareAsync" Disabled="_busy" Class="mt-1">Share</MudButton>
             </MudStack>
 
             @if (_shares.Count > 0)
             {
-                <MudList T="string" Dense="true" Class="mt-2">
-                    @foreach (var share in _shares)
-                    {
-                        <MudListItem T="string">
-                            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
-                                <MudIcon Icon="@(share.IsAccepted ? Icons.Material.Filled.Visibility : Icons.Material.Filled.HourglassTop)" Size="Size.Small" />
-                                <MudStack Spacing="0" Class="flex-grow-1">
-                                    <MudText Typo="Typo.body2">@share.Name</MudText>
-                                    <MudText Typo="Typo.caption" Class="mud-text-secondary">
-                                        @(share.Name == share.Email ? "" : $"{share.Email} · ")@(share.IsAccepted ? "can view your ledger" : "invited, waiting for them to accept")
-                                    </MudText>
-                                </MudStack>
-                                <MudButton Size="Size.Small" Color="Color.Error" OnClick="() => StopSharingAsync(share)">@(share.IsAccepted ? "Stop sharing" : "Cancel")</MudButton>
+                @foreach (var share in _shares)
+                {
+                    <div class="share-row mt-3" aria-label="@share.Name">
+                        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                            <MudIcon Icon="@(share.IsAccepted ? Icons.Material.Filled.Visibility : Icons.Material.Filled.HourglassTop)" Size="Size.Small" />
+                            <MudStack Spacing="0" Class="flex-grow-1" Style="min-width:0">
+                                <MudText Typo="Typo.body2" Style="overflow-wrap:anywhere">@share.Name</MudText>
+                                <MudText Typo="Typo.caption" Class="mud-text-secondary" Style="overflow-wrap:anywhere">
+                                    @(share.Name == share.Email ? "" : $"{share.Email} · ")@(share.IsAccepted ? "has accepted" : "invited, waiting for them to accept")
+                                </MudText>
                             </MudStack>
-                        </MudListItem>
-                    }
-                </MudList>
+                            <MudButton Size="Size.Small" Color="Color.Error" OnClick="() => StopSharingAsync(share)" Style="flex:none">@(share.IsAccepted ? "Stop sharing" : "Cancel")</MudButton>
+                        </MudStack>
+                        <MudSelect T="LedgerRole" Value="share.Role" ValueChanged="role => SetRoleAsync(share, role)" Label="They can" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                   ToStringFunc="RoleName" HelperText="@RoleHelp(share.Role)" Class="share-role">
+                            @foreach (var role in Roles)
+                            {
+                                <MudSelectItem T="LedgerRole" Value="role">@RoleName(role)</MudSelectItem>
+                            }
+                        </MudSelect>
+                    </div>
+                }
             }
         </MudPaper>
 
@@ -83,7 +96,7 @@
             @foreach (var invitation in _invitations)
             {
                 <MudAlert Severity="Severity.Info" Class="mt-2" NoIcon="true">
-                    <MudText Typo="Typo.body2"><strong>@invitation.OwnerName</strong> (@invitation.OwnerEmail) wants to share their ledger with you, view only.</MudText>
+                    <MudText Typo="Typo.body2"><strong>@invitation.OwnerName</strong> (@invitation.OwnerEmail) wants to share their ledger with you. You @RoleName(invitation.Role).ToLowerInvariant().</MudText>
                     <div class="d-flex gap-2 mt-2">
                         <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary" OnClick="() => RespondAsync(invitation, true)">Accept</MudButton>
                         <MudButton Size="Size.Small" OnClick="() => RespondAsync(invitation, false)">Decline</MudButton>
@@ -99,7 +112,7 @@
                         <MudSwitch T="bool" Value="shared.IsVisible" ValueChanged="v => SetVisibleAsync(shared, v)" Color="Color.Primary" aria-label="@($"Show {shared.Name}")" />
                         <MudStack Spacing="0" Class="flex-grow-1">
                             <MudText Typo="Typo.subtitle2">@shared.Name</MudText>
-                            <MudText Typo="Typo.caption" Class="mud-text-secondary">Shared by @shared.OwnerName · view only · @(shared.IsVisible ? "shown" : "hidden")</MudText>
+                            <MudText Typo="Typo.caption" Class="mud-text-secondary">Shared by @shared.OwnerName · @shared.AccessText · @(shared.IsVisible ? "shown" : "hidden")</MudText>
                         </MudStack>
                         <MudButton Size="Size.Small" Color="Color.Error" OnClick="() => LeaveAsync(shared)">Leave</MudButton>
                     </MudStack>
@@ -134,7 +147,24 @@
     private bool _loading = true;
     private bool _busy;
     private string? _email;
+    private LedgerRole _role = LedgerRole.Viewer;
     private string? _shareError;
+
+    private static readonly LedgerRole[] Roles = [LedgerRole.Viewer, LedgerRole.Contributor, LedgerRole.Editor];
+
+    private static string RoleName(LedgerRole role) => role switch
+    {
+        LedgerRole.Editor => "Can edit",
+        LedgerRole.Contributor => "Can add transactions",
+        _ => "Can view"
+    };
+
+    private static string RoleHelp(LedgerRole role) => role switch
+    {
+        LedgerRole.Editor => "Add and change anything, like accounts and bills",
+        LedgerRole.Contributor => "Add transactions and mark bills paid",
+        _ => "See everything, change nothing"
+    };
     private string? _displayName;
     private LedgerScope _scope = LedgerScope.None;
     private List<LedgerShare> _shares = [];
@@ -177,7 +207,7 @@
         _shareError = null;
         try
         {
-            await Ledger.ShareAsync(_email);
+            await Ledger.ShareAsync(_email, _role);
             Snackbar.Add($"Invitation sent to {_email.Trim()}. It shows up for them right away.", Severity.Success);
             _email = null;
             _shares = await Ledger.GetSharesAsync();
@@ -200,6 +230,15 @@
         if (confirmed != true)
             return;
         await Ledger.StopSharingAsync(share.MemberId);
+        _shares = await Ledger.GetSharesAsync();
+    }
+
+    private async Task SetRoleAsync(LedgerShare share, LedgerRole role)
+    {
+        if (role == share.Role)
+            return;
+        await Ledger.SetShareRoleAsync(share.MemberId, role);
+        Snackbar.Add($"{share.Name} {RoleName(role).ToLowerInvariant()} now", Severity.Success);
         _shares = await Ledger.GetSharesAsync();
     }
 

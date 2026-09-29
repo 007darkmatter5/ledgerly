@@ -2,6 +2,7 @@
 
 <MudDialog>
     <DialogContent>
+        <LedgerPicker Value="Model.LedgerId" ValueChanged="OnLedgerChangedAsync" Fixed="Model.Id != 0" />
         @if (_accounts.Count == 0)
         {
             <MudAlert Severity="Severity.Info" Class="mb-3">Add an account first so income has somewhere to go.</MudAlert>
@@ -68,11 +69,23 @@
     {
         _startDate = Model.Id == 0 ? null : Model.StartDate;
         _endDate = Model.EndDate;
-        _accounts = (await Ledger.GetAccountsAsync()).Where(a => a.IsActive || a.Id == Model.DepositToAccountId).ToList();
+        await LoadAccountsAsync();
+    }
+
+    private async Task LoadAccountsAsync()
+    {
+        _accounts = (await Ledger.GetAccountsAsync(ledgerId: Model.LedgerId)).Where(a => a.IsActive || a.Id == Model.DepositToAccountId).ToList();
 
         var preferred = _accounts.FirstOrDefault(a => a.Type == AccountType.Checking) ?? _accounts.FirstOrDefault();
         if (Model.DepositToAccountId == 0 && preferred is not null)
             Model.DepositToAccountId = preferred.Id;
+    }
+
+    private async Task OnLedgerChangedAsync(int ledgerId)
+    {
+        Model.LedgerId = ledgerId;
+        Model.DepositToAccountId = 0;
+        await LoadAccountsAsync();
     }
 
     private async Task SaveAsync()

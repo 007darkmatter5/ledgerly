@@ -4,6 +4,7 @@
 
 <MudDialog>
     <DialogContent>
+        <LedgerPicker Value="Model.LedgerId" ValueChanged="OnLedgerChangedAsync" Role="LedgerRole.Contributor" Fixed="Model.Id != 0" />
         @if (_accounts.Count == 0)
         {
             <MudAlert Severity="Severity.Info" Class="mb-3">Add an account first, so there's somewhere for the money to come from.</MudAlert>
@@ -41,7 +42,7 @@
                     <DateOnlyPicker @bind-Value="_date" Label="Date" Required="true" HelperText="@DateHint" />
                 </MudItem>
                 <MudItem xs="12" sm="6">
-                    <PayeePicker @bind-Value="Model.PayeeId" />
+                    <PayeePicker @bind-Value="Model.PayeeId" LedgerId="Model.LedgerId" />
                 </MudItem>
                 <MudItem xs="12" sm="6">
                     <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center">
@@ -114,20 +115,33 @@
 
     protected override async Task OnInitializedAsync()
     {
-        _accounts = (await Ledger.GetAccountsAsync())
-            .Where(a => a.IsActive || a.Id == Model.AccountId)
-            .ToList();
-        _categories = await Ledger.GetCategoriesAsync();
         _date = Model.Id == 0 ? Ledger.Today : Model.Date;
         _amount = Model.Id == 0 ? null : Model.Amount;
+        await LoadChoicesAsync();
+    }
+
+    /// <summary>Accounts and categories of the transaction's ledger: it can't use another ledger's.</summary>
+    private async Task LoadChoicesAsync()
+    {
+        _accounts = (await Ledger.GetAccountsAsync(ledgerId: Model.LedgerId))
+            .Where(a => a.IsActive || a.Id == Model.AccountId)
+            .ToList();
+        _categories = await Ledger.GetCategoriesAsync(ledgerId: Model.LedgerId);
 
         if (Model.Id == 0 && Model.AccountId == 0 && _accounts.Count > 0)
         {
-            var last = await Ledger.GetLastTransactionAccountIdAsync();
+            var last = await Ledger.GetLastTransactionAccountIdAsync(Model.LedgerId);
             Model.AccountId = (_accounts.FirstOrDefault(a => a.Id == last && a.IsActive)
                 ?? _accounts.FirstOrDefault(a => a.Type == AccountType.Checking)
                 ?? _accounts[0]).Id;
         }
+    }
+
+    private async Task OnLedgerChangedAsync(int ledgerId)
+    {
+        (Model.LedgerId, Model.AccountId, Model.CategoryId, Model.PayeeId) = (ledgerId, 0, null, null);
+        await LoadChoicesAsync();
+        await _form.ResetValidationAsync(); // leaving the amount field to pick a ledger isn't a mistake yet
     }
 
     private void Cancel()
@@ -160,7 +174,7 @@
 
             // Keep the account, date and direction for the next one; clear the rest.
             Snackbar.Add($"Added {Model.Description}", Severity.Success);
-            Model = new Transaction { AccountId = Model.AccountId, Direction = Model.Direction };
+            Model = new Transaction { LedgerId = Model.LedgerId, AccountId = Model.AccountId, Direction = Model.Direction };
             _amount = null;
             await _form.ResetValidationAsync();
             await _amountField.FocusAsync();
@@ -190,12 +204,13 @@
     {
         var parameters = new DialogParameters<CategoryDialog>
         {
-            { d => d.Model, new Category { Color = CategoryChip.Palette[_categories.Count % CategoryChip.Palette.Length] } }
+            { d => d.Model, new Category { LedgerId = Model.LedgerId, Color = CategoryChip.Palette[_categories.Count % CategoryChip.Palette.Length] } },
+            { d => d.LedgerFixed, true }
         };
         var dialog = await Dialogs.ShowAsync<CategoryDialog>("New category", parameters, new DialogOptions { MaxWidth = MaxWidth.ExtraSmall, FullWidth = true });
         if (await dialog.Result is { Canceled: false, Data: int id })
         {
-            _categories = await Ledger.GetCategoriesAsync();
+            _categories = await Ledger.GetCategoriesAsync(ledgerId: Model.LedgerId);
             Model.CategoryId = id;
         }
     }

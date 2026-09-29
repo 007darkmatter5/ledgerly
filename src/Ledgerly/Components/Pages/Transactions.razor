@@ -164,9 +164,9 @@
 
     [CascadingParameter] private LedgerScope Scope { get; set; } = LedgerScope.None;
 
-    /// <summary>The user's own transactions open for editing; shared ones get their ledger's color instead.</summary>
+    /// <summary>Transactions the user can change open for editing; shared ones also get their ledger's color.</summary>
     private string RowStyle(Transaction transaction, int _) =>
-        Scope.IsHome(transaction.LedgerId) ? "cursor:pointer" : Scope.RowStyle(transaction.LedgerId);
+        $"{(Scope.CanContribute(transaction.LedgerId) ? "cursor:pointer;" : "")} {Scope.RowStyle(transaction.LedgerId)}";
 
     private bool _loading = true;
     private List<Transaction> _transactions = [];
@@ -239,7 +239,7 @@
 
     private async Task EditAsync(Transaction? transaction)
     {
-        if (transaction is not null && !Scope.IsHome(transaction.LedgerId))
+        if (transaction is not null && !Scope.CanContribute(transaction.LedgerId))
             return; // shared with the user, view only
         if (await TransactionDialog.ShowAsync(Dialogs, transaction))
         {

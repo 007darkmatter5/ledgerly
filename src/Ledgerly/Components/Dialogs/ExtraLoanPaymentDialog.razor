@@ -56,7 +56,7 @@
     {
         _paidOn = Ledger.Today;
         _accountId = DefaultAccountId;
-        _accounts = await Ledger.GetAccountsAsync(activeOnly: true);
+        _accounts = await Ledger.GetAccountsAsync(activeOnly: true, ledgerId: Loan.LedgerId); // the payment goes in the loan's ledger
     }
 
     private async Task SaveAsync()

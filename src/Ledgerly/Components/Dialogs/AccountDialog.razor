@@ -2,6 +2,7 @@
 
 <MudDialog>
     <DialogContent>
+        <LedgerPicker @bind-Value="Model.LedgerId" Fixed="Model.Id != 0" />
         <MudForm @ref="_form">
             <MudGrid Spacing="2">
                 <MudItem xs="12" sm="8">

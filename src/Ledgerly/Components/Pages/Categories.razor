@@ -15,7 +15,7 @@
 </MudStack>
 
 <MudPaper Elevation="1">
-    <MudTable Items="_rows" Hover="true" Loading="_loading" Breakpoint="Breakpoint.Sm" Elevation="0">
+    <MudTable Items="_rows" Hover="true" Loading="_loading" Breakpoint="Breakpoint.Sm" Elevation="0" RowStyleFunc="RowStyle">
         <HeaderContent>
             <MudTh>Category</MudTh>
             <MudTh Style="text-align:right">Bills</MudTh>
@@ -25,6 +25,10 @@
         <RowTemplate>
             <MudTd DataLabel="Category">
                 <CategoryChip Category="context.Category" ShowUncategorized="true" />
+                @if (context.Category is { } category)
+                {
+                    <LedgerTag LedgerId="category.LedgerId" />
+                }
             </MudTd>
             <MudTd DataLabel="Bills" Style="text-align:right">
                 @if (context.BillCount > 0)
@@ -38,7 +42,7 @@
             </MudTd>
             <MudTd DataLabel="Per month" Style="text-align:right">@context.Monthly.ToString("C")</MudTd>
             <MudTd Style="text-align:right; white-space:nowrap">
-                @if (context.Category is { } category)
+                @if (context.Category is { } category && Scope.CanEdit(category.LedgerId))
                 {
                     <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="() => EditAsync(category)" aria-label="@($"Edit {category.Name}")" />
                     <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="() => DeleteAsync(context)" aria-label="@($"Delete {category.Name}")" />
@@ -61,15 +65,20 @@
 @code {
     private record Row(Category? Category, int BillCount, decimal Monthly);
 
+    [CascadingParameter] private LedgerScope Scope { get; set; } = LedgerScope.None;
+
     private bool _loading = true;
     private List<Row> _rows = [];
 
+    private string RowStyle(Row row, int _) => row.Category is { } category ? Scope.RowStyle(category.LedgerId) : "";
+
     protected override Task OnInitializedAsync() => LoadAsync();
 
+    /// <summary>The user's categories first, then those of shared ledgers that are switched on.</summary>
     private async Task LoadAsync()
     {
-        var categories = await Ledger.GetCategoriesAsync();
-        var bills = await Ledger.GetBillsAsync();
+        var categories = (await Ledger.GetCategoriesAsync(includeShared: true)).OrderBy(c => !Scope.IsHome(c.LedgerId)).ToList();
+        var bills = await Ledger.GetBillsAsync(includeShared: true);
 
         Row RowFor(Category? category, IEnumerable<Bill> inCategory)
         {
