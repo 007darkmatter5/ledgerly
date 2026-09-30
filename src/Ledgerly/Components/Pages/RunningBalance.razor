@@ -179,6 +179,7 @@ else if (belowThreshold is not null)
     private bool _loading = true;
     private List<Account> _accounts = [];
     private List<Bill> _bills = [];
+    private List<Bill> _cardPaymentsFromOthers = [];
     private List<Income> _incomes = [];
     private List<Transfer> _transfers = [];
     private List<Transaction> _transactions = [];
@@ -207,6 +208,7 @@ else if (belowThreshold is not null)
         // The user's own accounts first, then those of shared ledgers that are switched on.
         _accounts = (await Ledger.GetAccountsAsync(activeOnly: true, includeShared: true)).OrderBy(a => !Scope.IsHome(a.LedgerId)).ToList();
         _bills = await Ledger.GetBillsAsync(includeShared: true);
+        _cardPaymentsFromOthers = await Ledger.GetCardPaymentsFromOthersAsync(includeShared: true);
         _incomes = await Ledger.GetIncomesAsync(includeShared: true);
         _transfers = await Ledger.GetTransfersAsync(includeShared: true);
         _transactions = await Ledger.GetTransactionsAsync(includeShared: true);
@@ -281,7 +283,7 @@ else if (belowThreshold is not null)
             return;
         }
 
-        _result = Projection.Build(accounts, _bills, _incomes, _transfers, _transactions, Ledger.Today.AddDays(_days), _mode);
+        _result = Projection.Build(accounts, [.. _bills, .. _cardPaymentsFromOthers], _incomes, _transfers, _transactions, Ledger.Today.AddDays(_days), _mode);
         BuildChart(_result);
     }
 

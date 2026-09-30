@@ -157,18 +157,22 @@
                         <MudText Typo="Typo.body2">@bill.Name</MudText>
                         <MudText Typo="Typo.caption" Class="mud-text-secondary">
                             @Display.Of(bill.CardPaymentRule)@(bill.CardPaymentRule == CardPaymentRule.FixedAmount ? $" ({bill.ExpectedAmount:C})" : "")
-                            · @Display.Of(bill.Frequency).ToLowerInvariant() from @(bill.PayFromAccount?.Name ?? "no account")@(bill.AutoPay ? " · autopay" : "")@(bill.IsActive ? "" : " · inactive")
+                            · @Display.Of(bill.Frequency).ToLowerInvariant() from @(bill.PaidBy is { } payer ? payer.AccountName ?? "their account" : bill.PayFromAccount?.Name ?? "no account")@(bill.AutoPay ? " · autopay" : "")@(bill.IsActive ? "" : " · inactive")
                         </MudText>
                     </MudStack>
-                    @if (CanEdit)
+                    @if (bill.PaidBy is null && Scope.CanEdit(bill.LedgerId))
                     {
                         <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="() => EditBillAsync(bill)" aria-label="@($"Edit {bill.Name}")" />
                     }
                 </MudStack>
             }
-            @if (CanEdit && !_paymentBills.Any(b => b.IsActive))
+            @if (CanEdit && !_paymentBills.Any(b => b.IsActive && b.LedgerId == _card.LedgerId))
             {
                 <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.Add" OnClick="() => EditBillAsync(null)">Set up payment</MudButton>
+            }
+            @if (CanPayFromOwnLedger && !_paymentBills.Any(b => b.IsActive && Scope.IsHome(b.LedgerId)))
+            {
+                <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.Add" OnClick="() => EditBillAsync(null, fromOwnLedger: true)" Class="mt-1">Pay from my account</MudButton>
             }
         </MudPaper>
 
@@ -244,6 +248,9 @@
     /// <summary>The card is in the user's own ledger, or a shared one they can edit.</summary>
     private bool CanEdit => _card is not null && Scope.CanEdit(_card.LedgerId);
 
+    /// <summary>The card is in a shared ledger where the user may pay it from one of their own accounts.</summary>
+    private bool CanPayFromOwnLedger => _card is not null && !Scope.IsHome(_card.LedgerId) && Scope.Can(_card.LedgerId, LedgerService.CardPayerRole);
+
     private List<ChartSeries<double>> _series = [];
     private string[] _labels = [];
     private readonly LineChartOptions _chartOptions = new()
@@ -270,8 +277,10 @@
             return;
         }
 
-        var bills = await Ledger.GetBillsAsync(includeShared: true);
-        _paymentBills = bills.Where(b => b.CardAccountId == _card.Id).OrderBy(b => !b.IsActive).ThenBy(b => b.Name).ToList();
+        // Payments others make from their own ledgers count on the card too, and are listed after the card ledger's own.
+        List<Bill> bills = [.. await Ledger.GetBillsAsync(includeShared: true), .. await Ledger.GetCardPaymentsFromOthersAsync(includeShared: true)];
+        _paymentBills = bills.Where(b => b.CardAccountId == _card.Id)
+            .OrderBy(b => !b.IsActive).ThenBy(b => b.LedgerId != _card.LedgerId).ThenBy(b => b.Name).ToList();
         _charges = bills.Where(b => b.PayFromAccountId == _card.Id).OrderBy(b => !b.IsActive).ThenBy(b => b.Name).ToList();
         _statementDay = CreditCards.StatementDay(_card, bills);
 
@@ -329,13 +338,15 @@
         }
     }
 
-    private async Task EditBillAsync(Bill? bill)
+    /// <summary>Edits a payment bill, or sets one up in the card's ledger (or the user's own, paid from their account).</summary>
+    private async Task EditBillAsync(Bill? bill, bool fromOwnLedger = false)
     {
+        var card = _card!;
         var model = bill?.Copy() ?? new Bill
         {
-            LedgerId = _card!.LedgerId,
-            Name = $"{_card.Name} payment",
-            CardAccountId = _card.Id,
+            LedgerId = fromOwnLedger ? Scope.HomeLedgerId : card.LedgerId,
+            Name = $"{card.Name} payment",
+            CardAccountId = card.Id,
             CardPaymentRule = CardPaymentRule.StatementBalance
         };
         // A payment is usually due about 25 days after the statement closes.

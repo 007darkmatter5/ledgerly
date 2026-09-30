@@ -90,7 +90,11 @@
                         }
                         @foreach (var card in _cards)
                         {
-                            <MudSelectItem T="string" Value="@($"card:{card.Id}")">@card.Name (credit card)</MudSelectItem>
+                            <MudSelectItem T="string" Value="@($"card:{card.Id}")">@card.Name (credit card@(SharedName(card) is { } ledger ? $", {ledger}" : ""))</MudSelectItem>
+                        }
+                        @if (Model.CardAccountId is { } cardId && !_cards.Any(c => c.Id == cardId))
+                        {
+                            <MudSelectItem T="string" Value="@($"card:{cardId}")">@MissingCard</MudSelectItem>
                         }
                     </MudSelect>
                 </MudItem>
@@ -104,7 +108,14 @@
                             <MudRadio T="CardPaymentRule" Value="CardPaymentRule.FixedAmount" Color="Color.Primary">Pay a fixed amount</MudRadio>
                         </MudRadioGroup>
                         <MudText Typo="Typo.caption" Class="mud-text-secondary">
-                            The payment comes out of the paid-from account and lowers what you owe on the card. Record the actual amount when you mark it paid.
+                            @if (SharedCardOwner is { } owner)
+                            {
+                                @($"The payment comes out of your paid-from account and lowers what's owed on {owner}'s card. They'll see it on the card as a payment from you, with the account's name and the amounts, but not your notes or category. Record the actual amount when you mark it paid.")
+                            }
+                            else
+                            {
+                                @("The payment comes out of the paid-from account and lowers what you owe on the card. Record the actual amount when you mark it paid.")
+                            }
                         </MudText>
                     </MudItem>
                 }
@@ -169,6 +180,16 @@
 
     private bool IsCardPayment => Model.CardAccountId is not null;
 
+    private LedgerScope _scope = LedgerScope.None;
+
+    /// <summary>The name of the shared ledger a card is in, or null for the bill's own ledger.</summary>
+    private string? SharedName(Account card) => _scope.SharedFor(card.LedgerId)?.Name;
+
+    /// <summary>Who owns the card this bill pays, when it's a card in someone else's ledger.</summary>
+    private string? SharedCardOwner =>
+        _cards.FirstOrDefault(c => c.Id == Model.CardAccountId) is { } card && _scope.SharedFor(card.LedgerId) is { } shared && card.LedgerId != Model.LedgerId
+            ? shared.OwnerName : null;
+
     private string PaysOff => Model.LoanId is { } loanId ? $"loan:{loanId}" : Model.CardAccountId is { } cardId ? $"card:{cardId}" : "";
 
     protected override async Task OnInitializedAsync()
@@ -178,12 +199,21 @@
         await LoadChoicesAsync();
     }
 
-    /// <summary>Accounts, cards, loans and categories of the bill's ledger: it can't refer to another ledger's.</summary>
+    /// <summary>
+    /// Accounts, cards, loans and categories of the bill's ledger: it can't refer to another ledger's. The one exception:
+    /// a bill in the user's own ledger can pay a card in a shared ledger where they may record payments.
+    /// </summary>
     private async Task LoadChoicesAsync()
     {
+        _scope = await Ledger.GetScopeAsync();
         _categories = await Ledger.GetCategoriesAsync(ledgerId: Model.LedgerId);
         _accounts = await Ledger.GetAccountsAsync(activeOnly: true, ledgerId: Model.LedgerId);
         _cards = (await Ledger.GetAccountsAsync(ledgerId: Model.LedgerId)).Where(a => a.IsCreditCard && (a.IsActive || a.Id == Model.CardAccountId)).ToList();
+        if ((Model.LedgerId == 0 || Model.LedgerId == _scope.HomeLedgerId) && !_scope.HomeIsSample)
+        {
+            foreach (var shared in _scope.WritableShared(LedgerService.CardPayerRole))
+                _cards.AddRange((await Ledger.GetAccountsAsync(ledgerId: shared.LedgerId)).Where(a => a.IsCreditCard && (a.IsActive || a.Id == Model.CardAccountId)));
+        }
         _loans = (await Ledger.GetLoansAsync(ledgerId: Model.LedgerId)).Where(l => l.IsActive || l.Id == Model.LoanId).ToList();
 
         if (Model.Id == 0 && Model.PayFromAccountId is null && _accounts.FirstOrDefault(a => a.Type == AccountType.Checking) is { } checking)
@@ -201,8 +231,11 @@
     {
         null or "" => "None",
         _ when value.StartsWith("loan:") => _loans.FirstOrDefault(l => $"loan:{l.Id}" == value)?.Name ?? "",
-        _ => _cards.FirstOrDefault(c => $"card:{c.Id}" == value)?.Name ?? ""
+        _ => _cards.FirstOrDefault(c => $"card:{c.Id}" == value)?.Name ?? MissingCard
     };
+
+    /// <summary>The card the bill pays isn't offered: it's in a shared ledger that's switched off, or no longer shared.</summary>
+    private string MissingCard => Model.CardUnavailable ? "A card that's no longer shared with you" : "A card in a shared ledger that's switched off";
 
     private void OnPaysOffChanged(string? value)
     {

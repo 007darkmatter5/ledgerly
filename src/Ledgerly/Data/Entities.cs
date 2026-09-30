@@ -264,6 +264,19 @@ public class Bill : ILedgerEntity
     /// </summary>
     public IReadOnlyDictionary<DateOnly, decimal>? PaymentEstimates { get; set; }
 
+    /// <summary>
+    /// Set on a payment into one of the user's cards that someone the card's ledger is shared with records in their own
+    /// ledger (<see cref="Services.LedgerService.GetCardPaymentsFromOthersAsync"/>): who pays it, and from which account.
+    /// Such a bill is read-only and never listed as one of the user's bills. Not stored.
+    /// </summary>
+    public CardPayer? PaidBy { get; set; }
+
+    /// <summary>
+    /// The bill pays a card in another ledger that its owner can no longer record payments in (or the user can't see),
+    /// so <see cref="CardAccount"/> is left empty and the payment counts nowhere. Not stored.
+    /// </summary>
+    public bool CardUnavailable { get; set; }
+
     public bool AutoPay { get; set; }
     public bool IsActive { get; set; } = true;
     public string? Notes { get; set; }
@@ -272,6 +285,9 @@ public class Bill : ILedgerEntity
 
     public bool IsVariable => MaxAmount is { } max && max != ExpectedAmount;
 }
+
+/// <summary>Who pays a card from their own ledger (<see cref="Bill.PaidBy"/>), and from which of their accounts.</summary>
+public sealed record CardPayer(string Name, string? AccountName);
 
 /// <summary>
 /// What actually happened (or is known) for one scheduled due date of a bill:

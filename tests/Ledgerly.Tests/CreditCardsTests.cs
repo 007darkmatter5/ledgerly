@@ -190,6 +190,19 @@ public class CreditCardsTests
     }
 
     [Fact]
+    public void A_card_that_isnt_projected_is_paid_by_the_estimate_made_from_all_of_its_activity()
+    {
+        // The phone charge is in a shared ledger that's switched off, so only the estimate made when the bills were loaded knows about it.
+        var card = Card(owed: 500m);
+        var payment = Payment(card, CardPaymentRule.StatementBalance, D(9, 20));
+        payment.PaymentEstimates = new Dictionary<DateOnly, decimal> { [D(9, 20)] = 585m };
+
+        Assert.Equal(-585m, Assert.Single(Projection.Build([Checking], [payment], [], [], [], D(9, 30)).Entries).Amount);
+        Assert.Equal(-500m, Projection.Build([Checking, card], [payment], [], [], [], D(9, 30)).Entries.Single(e => e.AccountId == Checking.Id).Amount);
+        Assert.Equal(-500m, Assert.Single(Projection.Build([Checking], [payment], [], [], [], D(9, 30), ProjectionMode.WorstCase).Entries).Amount);
+    }
+
+    [Fact]
     public void Bill_schedules_show_card_payment_estimates()
     {
         var card = Card(owed: 500m);

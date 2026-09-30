@@ -841,6 +841,88 @@ public sealed class LedgerServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task A_contributor_can_pay_a_shared_card_from_their_own_account()
+    {
+        var (aliceChecking, _) = await AliceSharesWithBobAsync(LedgerRole.Contributor);
+        var alice = ServiceFor("alice");
+        var bob = ServiceFor("bob");
+        var visa = new Account { Name = "Alice Visa", Type = AccountType.CreditCard, Balance = -500m, BalanceAsOf = new DateOnly(2026, 9, 1), StatementDay = 5 };
+        await alice.SaveAccountAsync(visa);
+        var bobChecking = Checking("Bob checking");
+        await bob.SaveAccountAsync(bobChecking);
+        var bobCategory = new Category { Name = "Household" };
+        await bob.SaveCategoryAsync(bobCategory);
+        var bobLedger = (await bob.GetScopeAsync()).HomeLedgerId;
+        var aliceLedger = Assert.Single((await bob.GetScopeAsync()).Shared).LedgerId;
+
+        // Bob's payment lives in his ledger, paid from his account.
+        var payment = new Bill
+        {
+            Name = "Visa for Alice", ExpectedAmount = 200m, StartDate = new DateOnly(2026, 9, 10), CardAccountId = visa.Id,
+            CardPaymentRule = CardPaymentRule.FixedAmount, PayFromAccountId = bobChecking.Id, CategoryId = bobCategory.Id, Notes = "Bob's note"
+        };
+        await bob.SaveBillAsync(payment);
+        Assert.Equal(bobLedger, payment.LedgerId);
+        var bobBill = Assert.Single(await bob.GetBillsAsync());
+        Assert.Equal(("Alice Visa", false), (bobBill.CardAccount?.Name, bobBill.CardUnavailable));
+
+        // Alice's card counts it, but it isn't one of her bills, and she only sees who pays, from which account, and the amounts.
+        Assert.Equal(["Alice rent"], (await alice.GetBillsAsync()).Select(b => b.Name));
+        var incoming = Assert.Single(await alice.GetCardPaymentsFromOthersAsync());
+        Assert.Equal(("Payment from bob@example.com", new CardPayer("bob@example.com", "Bob checking"), 200m), (incoming.Name, incoming.PaidBy, incoming.ExpectedAmount));
+        Assert.Equal((null, null, null), (incoming.Notes, incoming.CategoryId, incoming.PayFromAccountId));
+        var projection = await alice.ProjectAsync([visa.Id], new DateOnly(2026, 9, 30));
+        Assert.Contains(projection.Entries, e => e.Kind == Ledgerly.Finance.ProjectionEntryKind.CardPayment && e.Description == "Payment from bob@example.com" && e.Amount == 200m);
+        Assert.Contains((await bob.ProjectAsync([bobChecking.Id], new DateOnly(2026, 9, 30))).Entries, e => e.Description == "Visa for Alice" && e.Amount == -200m);
+
+        // The money still has to come from the ledger the bill is in, and the bill from Bob's own ledger.
+        await Assert.ThrowsAsync<InvalidOperationException>(() => bob.SaveBillAsync(new Bill
+        {
+            Name = "Sneaky", ExpectedAmount = 1m, StartDate = new DateOnly(2026, 9, 1), CardAccountId = visa.Id, PayFromAccountId = aliceChecking.Id
+        }));
+        await Assert.ThrowsAsync<LedgerValidationException>(() => bob.SaveBillAsync(new Bill
+        {
+            LedgerId = aliceLedger, Name = "In Alice's", ExpectedAmount = 1m, StartDate = new DateOnly(2026, 9, 1), CardAccountId = visa.Id, PayFromAccountId = aliceChecking.Id
+        }));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => ServiceFor("carol").SaveBillAsync(new Bill
+        {
+            Name = "Carol's", ExpectedAmount = 1m, StartDate = new DateOnly(2026, 9, 1), CardAccountId = visa.Id
+        }));
+
+        // A statement-balance payment is estimated from all of the card's activity, even with Alice's ledger switched off:
+        // $500 owed plus Alice's $50 charge at the Sept 5 close, less Bob's $200 on Sept 10.
+        await alice.SaveBillAsync(new Bill { Name = "Streaming", ExpectedAmount = 50m, StartDate = new DateOnly(2026, 9, 2), PayFromAccountId = visa.Id });
+        var statement = new Bill
+        {
+            Name = "Visa statement", StartDate = new DateOnly(2026, 10, 1), CardAccountId = visa.Id, CardPaymentRule = CardPaymentRule.StatementBalance,
+            PayFromAccountId = bobChecking.Id
+        };
+        await bob.SaveBillAsync(statement);
+        await bob.SetSharedVisibleAsync(null, false);
+        var estimated = Assert.Single(await bob.GetBillsAsync(), b => b.Id == statement.Id);
+        Assert.Equal(350m, estimated.PaymentEstimates![new DateOnly(2026, 10, 1)]);
+        await bob.SetSharedVisibleAsync(null, true);
+
+        // View only, the payments stop counting at once and Bob can't set up new ones.
+        var memberId = Assert.Single(await alice.GetSharesAsync()).MemberId;
+        await alice.SetShareRoleAsync(memberId, LedgerRole.Viewer);
+        Assert.Empty(await alice.GetCardPaymentsFromOthersAsync());
+        bobBill = Assert.Single(await bob.GetBillsAsync(), b => b.Id == payment.Id);
+        Assert.Equal((null, true), (bobBill.CardAccount, bobBill.CardUnavailable));
+        await Assert.ThrowsAsync<LedgerValidationException>(() => bob.SaveBillAsync(bobBill));
+        await Assert.ThrowsAsync<LedgerValidationException>(() => bob.SaveBillAsync(new Bill
+        {
+            Name = "Another", ExpectedAmount = 1m, StartDate = new DateOnly(2026, 9, 1), CardAccountId = visa.Id, PayFromAccountId = bobChecking.Id
+        }));
+
+        // Restored, they count again; if Alice deletes the card, Bob's bills stop paying it.
+        await alice.SetShareRoleAsync(memberId, LedgerRole.Contributor);
+        Assert.Equal(2, (await alice.GetCardPaymentsFromOthersAsync()).Count);
+        await alice.DeleteAccountAsync(visa.Id);
+        Assert.All(await bob.GetBillsAsync(), b => Assert.Null(b.CardAccountId));
+    }
+
+    [Fact]
     public async Task Shared_ledgers_can_be_switched_off_and_access_ends_when_either_side_stops()
     {
         await AliceSharesWithBobAsync();

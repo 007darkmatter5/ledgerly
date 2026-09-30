@@ -256,22 +256,121 @@ public class LedgerService(IDbContextFactory<LedgerlyDbContext> dbFactory, ICurr
             .Include(b => b.Occurrences)
             .ToListAsync();
 
-        // Card payments depend on what's charged to the card, including logged transactions.
-        var cardIds = bills.Where(b => b.CardAccountId is not null).Select(b => b.CardAccountId!.Value).Distinct().ToList();
-        var cardTransactions = cardIds.Count == 0
-            ? []
-            : await db.Transactions.AsNoTracking().Where(t => ledgerIds.Contains(t.LedgerId) && cardIds.Contains(t.AccountId)).ToListAsync();
-        CreditCards.EstimatePayments(bills, cardTransactions, Today.AddYears(1));
+        // A payment into a card in another ledger only counts while the payer may still record payments there, and
+        // only shows the card to someone who can see that ledger.
+        var crossLedger = bills.Where(b => b.CardAccount is { } card && card.LedgerId != b.LedgerId).Select(b => b.Id).ToList();
+        if (crossLedger.Count > 0)
+        {
+            var linked = await CardPaymentsLinkedAcrossLedgers(db).Where(b => crossLedger.Contains(b.Id)).Select(b => b.Id).ToListAsync();
+            var scope = await GetScopeAsync();
+            var seen = scope.Shared.Select(s => s.LedgerId).Append(scope.HomeLedgerId).ToHashSet();
+            foreach (var bill in bills.Where(b => crossLedger.Contains(b.Id) && (!linked.Contains(b.Id) || !seen.Contains(b.CardAccount!.LedgerId))))
+                (bill.CardAccount, bill.CardUnavailable) = (null, true);
+        }
+
+        // Card payments depend on everything that moves the card: bills and transactions in its own ledger (which may
+        // not be among those read here) and payments from other ledgers.
+        var cards = bills.Where(b => b.CardAccount is not null).Select(b => b.CardAccount!).DistinctBy(c => c.Id).ToList();
+        if (cards.Count > 0)
+        {
+            var cardIds = cards.Select(c => c.Id).ToList();
+            var cardLedgerIds = cards.Select(c => c.LedgerId).Distinct().ToList();
+            var loaded = bills.Select(b => b.Id).ToHashSet();
+            var cardBills = (await db.Bills.AsNoTracking()
+                    .Where(b => cardLedgerIds.Contains(b.LedgerId)
+                        && ((b.CardAccountId != null && cardIds.Contains(b.CardAccountId.Value)) || (b.PayFromAccountId != null && cardIds.Contains(b.PayFromAccountId.Value))))
+                    .Include(b => b.Occurrences)
+                    .ToListAsync())
+                .Where(b => !loaded.Contains(b.Id));
+            var fromOthers = await CardPaymentsFromOthersAsync(db, cards, [.. ledgerIds, .. cardLedgerIds]);
+            var cardTransactions = await db.Transactions.AsNoTracking().Where(t => cardIds.Contains(t.AccountId)).ToListAsync();
+            CreditCards.EstimatePayments([.. bills, .. cardBills, .. fromOthers], cardTransactions, Today.AddYears(1));
+        }
         return bills.OrderBy(b => b.Name).ToList();
     }
 
-    /// <summary>Saves a bill. Throws <see cref="LedgerValidationException"/> if it links a loan and a card, or pays a card from a card.</summary>
+    /// <summary>
+    /// Payments into the cards of the ledgers read (as <see cref="GetBillsAsync"/>) that someone those ledgers are
+    /// shared with records in their own ledger, from their own account. They hold only what the card's side may see:
+    /// the schedule, rule, recorded amounts and dates, and who pays from which account (<see cref="Bill.PaidBy"/>).
+    /// Pass them along with the bills to anything that plays a card forward; never list them as the user's bills.
+    /// </summary>
+    public async Task<List<Bill>> GetCardPaymentsFromOthersAsync(bool includeShared = false)
+    {
+        var ledgerIds = await ReadLedgerIdsAsync(includeShared);
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var cards = await db.Accounts.AsNoTracking().Where(a => ledgerIds.Contains(a.LedgerId) && a.Type == AccountType.CreditCard).ToListAsync();
+        return await CardPaymentsFromOthersAsync(db, cards, ledgerIds);
+    }
+
+    /// <summary>Payments into <paramref name="cards"/> from bills outside <paramref name="loadedLedgerIds"/>, trimmed to what the card's side may see.</summary>
+    private static async Task<List<Bill>> CardPaymentsFromOthersAsync(LedgerlyDbContext db, IReadOnlyCollection<Account> cards, IReadOnlyCollection<int> loadedLedgerIds)
+    {
+        var cardIds = cards.Select(c => c.Id).ToList();
+        if (cardIds.Count == 0)
+            return [];
+        var bills = await CardPaymentsLinkedAcrossLedgers(db).AsNoTracking()
+            .Where(b => cardIds.Contains(b.CardAccountId!.Value) && !loadedLedgerIds.Contains(b.LedgerId))
+            .Include(b => b.PayFromAccount)
+            .Include(b => b.Occurrences)
+            .ToListAsync();
+        if (bills.Count == 0)
+            return [];
+
+        var payerLedgers = bills.Select(b => b.LedgerId).Distinct().ToList();
+        var payers = (await (
+                from l in db.Ledgers
+                join u in db.Users on l.OwnerId equals u.Id
+                where payerLedgers.Contains(l.Id)
+                select new { l.Id, u.DisplayName, u.Email })
+            .ToListAsync()).ToDictionary(p => p.Id, p => ApplicationUser.NameOf(p.DisplayName, p.Email));
+        var cardsById = cards.ToDictionary(c => c.Id);
+        return bills.Select(b => new Bill
+        {
+            Id = b.Id,
+            LedgerId = b.LedgerId,
+            Name = $"Payment from {payers[b.LedgerId]}",
+            ExpectedAmount = b.ExpectedAmount,
+            Frequency = b.Frequency,
+            StartDate = b.StartDate,
+            EndDate = b.EndDate,
+            CardAccountId = b.CardAccountId,
+            CardAccount = cardsById[b.CardAccountId!.Value],
+            CardPaymentRule = b.CardPaymentRule,
+            AutoPay = b.AutoPay,
+            IsActive = b.IsActive,
+            Occurrences = b.Occurrences.Select(o => new BillOccurrence { BillId = o.BillId, DueDate = o.DueDate, Amount = o.Amount, PaidOn = o.PaidOn }).ToList(),
+            PaidBy = new CardPayer(payers[b.LedgerId], b.PayFromAccount?.Name)
+        }).ToList();
+    }
+
+    /// <summary>
+    /// Bills that pay a card in another ledger and still count there: the bill is in its owner's personal ledger, and
+    /// the card's ledger is shared with that owner (accepted) with at least <see cref="CardPayerRole"/>. Checked on
+    /// every read, so removed access or a lower role applies at once.
+    /// </summary>
+    private static IQueryable<Bill> CardPaymentsLinkedAcrossLedgers(LedgerlyDbContext db) =>
+        db.Bills.Where(b => b.CardAccountId != null && db.Ledgers.Any(payer =>
+            payer.Id == b.LedgerId && !payer.IsSample && payer.Id != b.CardAccount!.LedgerId
+            && db.LedgerMembers.Any(m => m.LedgerId == b.CardAccount!.LedgerId && m.UserId == payer.OwnerId && m.AcceptedAt != null && m.Role != LedgerRole.Viewer)));
+
+    /// <summary>
+    /// The role someone needs on a shared ledger to pay its cards from their own ledger. It's their own money, like
+    /// recording a payment. Keep <see cref="CardPaymentsLinkedAcrossLedgers"/> in step with it.
+    /// </summary>
+    public const LedgerRole CardPayerRole = LedgerRole.Contributor;
+
+    /// <summary>
+    /// Saves a bill. Throws <see cref="LedgerValidationException"/> if it links a loan and a card, or pays a card from a card.
+    /// Everything it refers to is in its own ledger, except that a bill in the user's personal ledger may pay a card in a
+    /// ledger shared with them with at least <see cref="CardPayerRole"/> (from one of their own accounts).
+    /// </summary>
     public async Task SaveBillAsync(Bill bill)
     {
         await using var db = await dbFactory.CreateDbContextAsync();
         var ledgerId = await TargetLedgerAsync(db, bill, LedgerRole.Editor);
         await EnsureInLedgerAsync(db.Accounts, bill.PayFromAccountId, ledgerId);
-        await EnsureInLedgerAsync(db.Accounts, bill.CardAccountId, ledgerId);
+        await EnsureCardPayableAsync(db, bill, ledgerId);
         await EnsureInLedgerAsync(db.Loans, bill.LoanId, ledgerId);
         await EnsureInLedgerAsync(db.Categories, bill.CategoryId, ledgerId);
         await EnsureInLedgerAsync(db.Payees, bill.PayeeId, ledgerId);
@@ -287,6 +386,34 @@ public class LedgerService(IDbContextFactory<LedgerlyDbContext> dbFactory, ICurr
                 throw new LedgerValidationException("Pay a credit card from a bank account, not from a credit card.");
         }
         await SaveAsync(db, bill, ledgerId);
+    }
+
+    /// <summary>
+    /// Checks the card a bill pays: one in the bill's own ledger, or a card in a shared ledger (see <see cref="SaveBillAsync"/>).
+    /// A link that's already saved may stay while it still counts, so someone else editing the bill doesn't break it.
+    /// </summary>
+    private async Task EnsureCardPayableAsync(LedgerlyDbContext db, Bill bill, int ledgerId)
+    {
+        if (bill.CardAccountId is not { } cardId)
+            return;
+        var cardLedgerId = await db.Accounts.Where(a => a.Id == cardId).Select(a => (int?)a.LedgerId).SingleOrDefaultAsync()
+            ?? throw new InvalidOperationException($"Account {cardId} was not found.");
+        if (cardLedgerId == ledgerId)
+            return;
+
+        if (bill.Id != 0 && await db.Bills.AnyAsync(b => b.Id == bill.Id && b.CardAccountId == cardId))
+        {
+            if (!await CardPaymentsLinkedAcrossLedgers(db).AnyAsync(b => b.Id == bill.Id))
+                throw new LedgerValidationException("That card isn't shared with you for payments any more. Choose another under \"Pays off\".");
+            return;
+        }
+
+        var scope = await GetScopeAsync();
+        var role = scope.RoleIn(cardLedgerId) ?? throw new InvalidOperationException($"Account {cardId} was not found.");
+        if (ledgerId != scope.HomeLedgerId || scope.HomeIsSample)
+            throw new LedgerValidationException("A payment on a card from someone else's ledger has to come from your own ledger.");
+        if (role < CardPayerRole)
+            throw new LedgerValidationException($"Paying a card in a shared ledger needs “{LedgerScope.AccessText(CardPayerRole)}” access there.");
     }
 
     public Task DeleteBillAsync(int id) => DeleteAsync<Bill>(id, LedgerRole.Editor);
@@ -570,7 +697,8 @@ public class LedgerService(IDbContextFactory<LedgerlyDbContext> dbFactory, ICurr
     {
         var ids = accountIds.ToHashSet();
         var accounts = (await GetAccountsAsync(includeShared: includeShared)).Where(a => ids.Contains(a.Id)).ToList();
-        return Projection.Build(accounts, await GetBillsAsync(includeShared), await GetIncomesAsync(includeShared), await GetTransfersAsync(includeShared),
+        List<Bill> bills = [.. await GetBillsAsync(includeShared), .. await GetCardPaymentsFromOthersAsync(includeShared)];
+        return Projection.Build(accounts, bills, await GetIncomesAsync(includeShared), await GetTransfersAsync(includeShared),
             await GetTransactionsAsync(includeShared: includeShared), through, mode);
     }
 

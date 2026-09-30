@@ -143,7 +143,12 @@ public static class Projection
                 if (date < account.BalanceAsOf || date > through)
                     continue;
 
-                var cardEstimate = occurrence?.Amount is null ? cardSimulation?.PaymentFor(bill, due) : null;
+                // A card that isn't projected here may be moved by bills not passed in (e.g. a card in a shared ledger
+                // that's switched off), so prefer the estimate made from all of its activity when the bills were loaded.
+                var cardEstimate = occurrence?.Amount is not null ? null
+                    : bill.CardAccountId is { } estimated && !byId.ContainsKey(estimated) && mode == ProjectionMode.Expected
+                        && bill.PaymentEstimates?.TryGetValue(due, out var known) == true ? known
+                    : cardSimulation?.PaymentFor(bill, due);
                 var amount = occurrence?.Amount
                     ?? cardEstimate
                     ?? (mode == ProjectionMode.WorstCase ? bill.MaxAmount ?? bill.ExpectedAmount : bill.ExpectedAmount);

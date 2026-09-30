@@ -238,9 +238,10 @@ else
         var incomes = await Ledger.GetIncomesAsync(includeShared: true);
         var transfers = await Ledger.GetTransfersAsync(includeShared: true);
         var transactions = await Ledger.GetTransactionsAsync(includeShared: true);
+        List<Bill> projected = [.. bills, .. await Ledger.GetCardPaymentsFromOthersAsync(includeShared: true)];
 
         _projections = _accounts
-            .Select(a => (a, Projection.Build([a], bills, incomes, transfers, transactions, today.AddDays(30))))
+            .Select(a => (a, Projection.Build([a], projected, incomes, transfers, transactions, today.AddDays(30))))
             .ToList();
 
         _upcoming30 = BillSchedule.Between(bills, today, today.AddDays(30)).ToList();

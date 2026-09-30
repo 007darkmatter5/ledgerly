@@ -20,10 +20,10 @@ page.on('websocket', (ws) => {
 
 // After a full page load the button renders before the interactive connection is ready, so a
 // click can be lost. Click again until the dialog opens.
-async function openDialog(buttonText) {
+async function openDialog(buttonText, on = page) {
   for (let attempt = 0; attempt < 10; attempt++) {
-    await page.click(`text=${buttonText}`);
-    if (await page.waitForSelector('.mud-dialog input', { timeout: 3000 }).then(() => true, () => false)) return;
+    await on.click(`text=${buttonText}`);
+    if (await on.waitForSelector('.mud-dialog input', { timeout: 3000 }).then(() => true, () => false)) return;
   }
   throw new Error(`"${buttonText}" did not open its dialog`);
 }
@@ -251,6 +251,36 @@ try {
   note(`bill dialog explains the shared ledger needs "can edit": ${roleNote}`);
   if (!roleNote) { note(`FAIL: no role note in the bill dialog: ${await other.locator('.mud-dialog').allInnerTexts()}`); failed = true; }
   await other.keyboard.press('Escape');
+
+  // They can still pay the owner's card from their own account: the bill goes in their ledger, and the owner's card
+  // shows it as a payment from them (read-only).
+  await page.goto(`${base}/accounts`);
+  await openDialog('Add account');
+  await page.fill('.mud-dialog input >> nth=0', 'E2E Visa');
+  await page.locator('.mud-dialog .mud-select .mud-input-control', { hasText: 'Type' }).click();
+  await page.locator('.mud-popover-open .mud-list-item', { hasText: 'Credit card' }).click();
+  await page.click('.mud-dialog button:has-text("Save")');
+  await page.waitForSelector('.mud-table-body >> text=E2E Visa', { timeout: 5000 });
+  await other.goto(`${base}/accounts`);
+  await openDialog('Add account', other);
+  await other.fill('.mud-dialog input >> nth=0', 'E2E Partner Checking');
+  await other.click('.mud-dialog button:has-text("Save")');
+  await other.waitForSelector('.mud-table-body >> text=E2E Partner Checking', { timeout: 5000 });
+  await other.goto(`${base}/cards`);
+  await other.locator('text=E2E Visa').first().click();
+  await other.waitForURL(/\/cards\/\d+/, { timeout: 10000 });
+  await openDialog('Pay from my account', other);
+  await other.waitForFunction(() => [...document.querySelectorAll('.mud-dialog input')].some((i) => i.value === 'E2E Partner Checking'), null, { timeout: 5000 });
+  await other.locator('.mud-dialog').getByRole('button', { name: 'Save', exact: true }).click();
+  await other.waitForSelector('.mud-dialog', { state: 'detached', timeout: 5000 });
+  await page.goto(`${base}/cards`);
+  await page.locator('text=E2E Visa').first().click();
+  await page.waitForURL(/\/cards\/\d+/, { timeout: 10000 });
+  const cardPaid = await page.locator('text=Payment from e2e-partner@example.com').waitFor({ timeout: 10000 }).then(() => true, () => false)
+    && await page.locator('text=from E2E Partner Checking').count() > 0;
+  note(`owner's card shows the payment from the other user's account: ${cardPaid}`);
+  if (!cardPaid) { note(`FAIL: the owner's card doesn't show the payment: ${await page.locator('.mud-paper', { hasText: 'Payments' }).first().innerText()}`); failed = true; }
+
   await other.goto(`${base}/transactions`);
   await other.waitForSelector('.mud-table-body tr:has-text("E2E Dinner out")', { timeout: 10000 });
 

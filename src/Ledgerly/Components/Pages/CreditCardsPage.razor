@@ -113,7 +113,7 @@
     private async Task LoadAsync()
     {
         var today = Ledger.Today;
-        var bills = await Ledger.GetBillsAsync(includeShared: true);
+        List<Bill> bills = [.. await Ledger.GetBillsAsync(includeShared: true), .. await Ledger.GetCardPaymentsFromOthersAsync(includeShared: true)];
         var transactions = await Ledger.GetTransactionsAsync(includeShared: true);
         _cards = (await Ledger.GetAccountsAsync(includeShared: true))
             .Where(a => a.IsCreditCard)

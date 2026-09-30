@@ -82,6 +82,12 @@
                         {
                             <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Href="@($"cards/{context.CardAccount.Id}")" Icon="@Icons.Material.Filled.CreditCard">@context.CardAccount.Name</MudChip>
                         }
+                        else if (context.CardUnavailable)
+                        {
+                            <MudTooltip Text="It pays a card in a ledger that's no longer shared with you for payments, so it doesn't count on that card. Edit it to choose another.">
+                                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Warning" Icon="@Icons.Material.Filled.CreditCardOff">Card no longer shared</MudChip>
+                            </MudTooltip>
+                        }
                         @if (!context.IsActive)
                         {
                             <MudChip T="string" Size="Size.Small">Inactive</MudChip>
