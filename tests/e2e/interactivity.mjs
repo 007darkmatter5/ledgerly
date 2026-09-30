@@ -237,6 +237,23 @@ try {
   note(`owner sees it on their own account: ${ownerText.includes('E2E Checking')}`);
   if (!ownerText.includes('E2E Checking')) { note(`FAIL: the owner doesn't see the partner's transaction: ${ownerText}`); failed = true; }
 
+  // Adding a bill needs "Can edit", so the bill dialog doesn't offer the shared ledger; it says why instead.
+  await other.goto(`${base}/bills`);
+  await other.waitForTimeout(2000);
+  let billOpened = false;
+  for (let attempt = 0; attempt < 10 && !billOpened; attempt++) {
+    await other.getByRole('button', { name: 'Add bill', exact: true }).click();
+    billOpened = await other.waitForSelector('.mud-dialog input', { timeout: 3000 }).then(() => true, () => false);
+  }
+  if (!billOpened) throw new Error('Add bill did not open the bill dialog for the other user');
+  const roleNote = await other.locator('.mud-dialog .ledger-note', { hasText: 'can edit' })
+    .waitFor({ timeout: 5000 }).then(() => true, () => false);
+  note(`bill dialog explains the shared ledger needs "can edit": ${roleNote}`);
+  if (!roleNote) { note(`FAIL: no role note in the bill dialog: ${await other.locator('.mud-dialog').allInnerTexts()}`); failed = true; }
+  await other.keyboard.press('Escape');
+  await other.goto(`${base}/transactions`);
+  await other.waitForSelector('.mud-table-body tr:has-text("E2E Dinner out")', { timeout: 10000 });
+
   await other.click('button[aria-label="Ledgers"]');
   await other.click(".ledgers-menu >> text=e2e's ledger");
   const hidden = await other.waitForSelector('.mud-table-body tr:has-text("E2E Dinner out")', { state: 'detached', timeout: 10000 }).then(() => true, () => false);

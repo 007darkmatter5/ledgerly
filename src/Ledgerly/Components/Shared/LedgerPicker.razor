@@ -1,5 +1,6 @@
 @* Which ledger an item goes in. For a new item it offers the user's own ledger and the shared ledgers (switched on)
-   where their role is at least Role, and renders nothing when that's the only choice. For an existing item (Fixed)
+   where their role is at least Role, and renders nothing when that's the only choice; shared ledgers where their role
+   is too low get a note saying what access the owner would have to give. For an existing item (Fixed)
    it can't change; it just names the shared ledger the item is in. Dialogs reload their pickers on ValueChanged,
    because everything an item refers to has to be in its ledger. Value 0 means the user's own ledger. *@
 @inject LedgerService Ledger
@@ -33,6 +34,19 @@ else if (_choices.Count > 0)
         }
     </MudSelect>
 }
+@if (!Fixed)
+{
+    @foreach (var shared in _limited)
+    {
+        <div class="ledger-note mb-3" style="@($"--ledger-color:{shared.Color}")">
+            <MudIcon Icon="@Icons.Material.Filled.Lock" Size="Size.Small" />
+            <span>
+                You can't add this to <strong>@shared.Name</strong>: your access is “@shared.AccessText”.
+                @shared.OwnerName would need to give you “@LedgerScope.AccessText(Role)” on their Sharing page.
+            </span>
+        </div>
+    }
+}
 
 @code {
     [Parameter] public int Value { get; set; }
@@ -48,6 +62,7 @@ else if (_choices.Count > 0)
 
     private LedgerScope? _scope;
     private List<SharedLedger> _choices = [];
+    private List<SharedLedger> _limited = []; // shared ledgers (switched on) where the user's role is too low for this item
 
     private int Current => Value == 0 ? _scope?.HomeLedgerId ?? 0 : Value;
 
@@ -55,6 +70,7 @@ else if (_choices.Count > 0)
     {
         _scope = await Ledger.GetScopeAsync();
         _choices = _scope.WritableShared(Role).ToList();
+        _limited = _scope.Visible.Where(s => s.Role < Role).ToList();
     }
 
     private string NameOf(int ledgerId) => _scope?.SharedFor(ledgerId)?.Name ?? "My ledger";
