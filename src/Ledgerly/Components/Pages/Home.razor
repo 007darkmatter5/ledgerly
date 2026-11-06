@@ -1,7 +1,18 @@
 @page "/"
 @inject LedgerService Ledger
 @inject NavigationManager Navigation
+@inject HomeViewStore HomeViews
 
+@if (_choosingView)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+}
+else if (_homeView == HomeView.Coverage)
+{
+    <CoverageView />
+}
+else
+{
 <PageTitle>Dashboard · Ledgerly</PageTitle>
 
 @if (_loading)
@@ -198,8 +209,11 @@ else
         </MudItem>
     </MudGrid>
 }
+}
 
 @code {
+    private bool _choosingView = true;
+    private HomeView _homeView = HomeView.Classic;
     private bool _loading = true;
     private bool _hasData;
     private bool _loadingSample;
@@ -217,7 +231,14 @@ else
     /// <summary>Noted under totals that include shared ledgers.</summary>
     private string SharedNote => Scope.HasVisibleShared ? " · including shared" : "";
 
-    protected override Task OnInitializedAsync() => LoadAsync();
+    protected override async Task OnInitializedAsync()
+    {
+        _homeView = await HomeViews.GetAsync();
+        _choosingView = false;
+        if (_homeView == HomeView.Coverage)
+            return;
+        await LoadAsync();
+    }
 
     private async Task LoadAsync()
     {

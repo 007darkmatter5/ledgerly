@@ -8,12 +8,15 @@
 @inject IJSRuntime JS
 @inject AppInfo App
 @inject SharingNotifier Notifier
+@inject HomeViewStore HomeViews
 
 <MudThemeProvider @ref="_themeProvider" Theme="_theme" @bind-IsDarkMode="_isDarkMode" />
 <MudPopoverProvider />
 <MudDialogProvider CloseOnEscapeKey="true" />
 <MudSnackbarProvider />
 
+<CascadingValue Value="_homeView">
+<CascadingValue Name="SetHomeView" Value="_setHomeView">
 <MudLayout>
     <MudAppBar Elevation="1">
         <MudIconButton Icon="@Icons.Material.Filled.Menu" Color="Color.Inherit" Edge="Edge.Start" OnClick="() => _drawerOpen = !_drawerOpen" aria-label="Toggle navigation" />
@@ -134,6 +137,11 @@
                     <MudMenuItem Icon="@Icons.Material.Filled.Science" OnClick="StartSampleAsync">Explore sample data</MudMenuItem>
                 }
                 <MudDivider />
+                <MudMenuItem Icon="@(_homeView == HomeView.Classic ? Icons.Material.Filled.RadioButtonChecked : Icons.Material.Filled.RadioButtonUnchecked)"
+                             OnClick="() => SetHomeViewAsync(HomeView.Classic)">Classic dashboard</MudMenuItem>
+                <MudMenuItem Icon="@(_homeView == HomeView.Coverage ? Icons.Material.Filled.RadioButtonChecked : Icons.Material.Filled.RadioButtonUnchecked)"
+                             OnClick="() => SetHomeViewAsync(HomeView.Coverage)">Coverage view</MudMenuItem>
+                <MudDivider />
                 <MudMenuItem Icon="@Icons.Material.Filled.ManageAccounts" Href="Account/Manage" ForceLoad="true">Account settings</MudMenuItem>
                 <MudMenuItem Icon="@Icons.Material.Filled.Logout" OnClick="SignOutAsync">Sign out</MudMenuItem>
             </ChildContent>
@@ -169,6 +177,8 @@
         </MudContainer>
     </MudMainContent>
 </MudLayout>
+</CascadingValue>
+</CascadingValue>
 
 @* Sign-out must be a real form post so the server can clear the auth cookie. *@
 <form id="logout-form" action="Account/Logout" method="post" hidden>
@@ -197,6 +207,8 @@
     private List<LedgerInvitation> _invitations = [];
     private readonly HashSet<int> _prompted = [];
     private Func<Task> _refreshLedgers = null!;
+    private HomeView _homeView = HomeView.Classic;
+    private readonly Func<HomeView, Task> _setHomeView;
 
     private string Initial => string.IsNullOrEmpty(_email) ? "?" : _email[..1].ToUpperInvariant();
 
@@ -215,6 +227,8 @@
         }
     };
 
+    public MainLayout() => _setHomeView = SetHomeViewAsync;
+
     protected override async Task OnInitializedAsync()
     {
         // Pages that change sharing (the Sharing page) call this so the Ledgers menu and the page reload.
@@ -230,6 +244,7 @@
 
         _email = state.User.Identity.Name;
         _userId = state.User.FindFirstValue(ClaimTypes.NameIdentifier);
+        _homeView = await HomeViews.GetAsync();
         _ledger = await Ledger.GetActiveLedgerAsync();
         _hasSample = await Ledger.HasSampleLedgerAsync();
         await LoadSharingAsync();
@@ -363,4 +378,14 @@
     }
 
     private async Task SignOutAsync() => await JS.InvokeVoidAsync("ledgerly.submitForm", "logout-form");
+
+    private async Task SetHomeViewAsync(HomeView view)
+    {
+        if (_homeView == view || _userId is null)
+            return;
+        await HomeViews.SetAsync(view);
+        // The open page keeps its own copy of the choice, so reload to apply it. A full load also
+        // keeps the switch isolated to this signed-in user on the next visit.
+        Navigation.NavigateTo(Navigation.Uri, forceLoad: true);
+    }
 }

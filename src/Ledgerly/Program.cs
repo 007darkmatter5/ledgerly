@@ -33,6 +33,7 @@ builder.Services.AddDbContextFactory<LedgerlyDbContext>(options => options.UseSq
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddScoped<ICurrentUser, AuthenticationStateCurrentUser>();
 builder.Services.AddScoped<LedgerService>();
+builder.Services.AddScoped<HomeViewStore>();
 builder.Services.AddSingleton<DataGeneration>();
 builder.Services.AddSingleton<SharingNotifier>();
 builder.Services.AddScoped<BackupService>();
