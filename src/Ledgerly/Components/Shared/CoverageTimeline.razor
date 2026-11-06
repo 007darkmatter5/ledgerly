@@ -1,0 +1,43 @@
+@if (Items.Count == 0)
+{
+    <MudText Typo="Typo.body2" Class="mud-text-secondary mb-3">Nothing in this list.</MudText>
+}
+else
+{
+    @foreach (var day in Items.GroupBy(e => e.Date))
+    {
+        <MudText Typo="Typo.subtitle2" Class="mt-3 mb-1">@Display.ShortDate(day.Key) · @Display.Relative(day.Key, Today)</MudText>
+        @foreach (var item in day)
+        {
+            <div class="coverage-event @(item.TriggersShortfall ? "coverage-event-short" : "")">
+                <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Wrap="Wrap.Wrap">
+                    <MudStack Spacing="0">
+                        <MudText Typo="Typo.body2">
+                            <MudLink Href="@item.Href">@item.Title</MudLink>
+                            <LedgerTag LedgerId="item.LedgerId" />
+                        </MudText>
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                            @item.AccountName · @StateLabel(item.State) · <Money Value="item.BalanceAfter" /> after@(item.TriggersShortfall ? " · shortfall" : "")
+                        </MudText>
+                    </MudStack>
+                    <MudText Typo="Typo.body2"><Money Value="item.Amount" ColorPositive="true" /></MudText>
+                </MudStack>
+            </div>
+        }
+    }
+}
+
+@code {
+    [Parameter, EditorRequired] public IReadOnlyList<CoverageEvent> Items { get; set; } = [];
+    [Parameter, EditorRequired] public DateOnly Today { get; set; }
+
+    private static string StateLabel(CoverageItemState state) => state switch
+    {
+        CoverageItemState.Logged => "Logged",
+        CoverageItemState.Recorded => "Recorded",
+        CoverageItemState.Assumed => "Assumed on schedule",
+        CoverageItemState.Estimated => "Estimate",
+        CoverageItemState.ScheduledIncome => "Scheduled income",
+        _ => "Scheduled"
+    };
+}

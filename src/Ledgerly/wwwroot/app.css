@@ -303,3 +303,29 @@ button.cal-item:focus-visible { outline: 2px solid var(--mud-palette-primary); o
 .color-swatch { width: 22px; height: 22px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; padding: 0; }
 .color-swatch.selected { border-color: var(--mud-palette-text-primary); box-shadow: 0 0 0 2px var(--mud-palette-surface) inset; }
 .color-swatch:focus-visible { outline: 2px solid var(--mud-palette-primary); outline-offset: 2px; }
+
+.coverage-nav { display: flex; flex-direction: column; padding: 12px 8px 8px; }
+.coverage-nav-link {
+    display: block; width: 100%; box-sizing: border-box; margin: 0; padding: 8px 12px;
+    border: 0; border-radius: 8px; background: none; color: inherit; font: inherit; text-align: left;
+    text-decoration: none; cursor: pointer;
+}
+.coverage-nav-link:hover { background: var(--mud-palette-action-default-hover); }
+.coverage-nav-link:focus-visible { outline: 2px solid var(--mud-palette-primary); outline-offset: -2px; }
+.coverage-nav-link[aria-current="page"] { background: var(--mud-palette-action-default-hover); font-weight: 600; }
+.coverage-nav-more { display: flex; flex-direction: column; padding-left: 12px; }
+.coverage-nav-more[hidden] { display: none; }
+.coverage-nav-label { margin: 12px 12px 2px; font-size: 0.75rem; color: var(--mud-palette-text-secondary); }
+.coverage-back {
+    display: inline-block; margin: -8px 0 16px; color: var(--mud-palette-primary); text-decoration: none;
+}
+.coverage-back:hover { text-decoration: underline; }
+.coverage-back:focus-visible { outline: 2px solid var(--mud-palette-primary); outline-offset: 2px; }
+.coverage-page { max-width: 42rem; }
+.coverage-answer { margin: 28px 0 8px; padding: 2px 0 2px 16px; border-left: 3px solid var(--mud-palette-lines-default); }
+.coverage-answer-short { border-left-color: var(--mud-palette-error); }
+.coverage-answer-ok { border-left-color: var(--mud-palette-success); }
+.coverage-answer-unknown { border-left-color: var(--mud-palette-warning); }
+.coverage-event { border-left: 3px solid var(--mud-palette-lines-default); padding: 8px 0 8px 12px; }
+.coverage-event-short { border-left-color: var(--mud-palette-error); }
+.coverage-balance { padding: 12px 0; border-top: 1px solid var(--mud-palette-lines-default); }
