@@ -17,7 +17,7 @@ else
                             <LedgerTag LedgerId="item.LedgerId" />
                         </MudText>
                         <MudText Typo="Typo.caption" Class="mud-text-secondary">
-                            @item.AccountName · @StateLabel(item.State) · @item.AccountName after <Money Value="item.BalanceAfter" />
+                            @item.AccountName · @StateLabel(item.State) · <Money Value="item.BalanceAfter" /> after@(item.TriggersShortfall ? " · shortfall" : "")
                         </MudText>
                     </MudStack>
                     <MudText Typo="Typo.body2"><Money Value="item.Amount" ColorPositive="true" /></MudText>

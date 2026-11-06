@@ -1,27 +1,59 @@
+@implements IDisposable
 @inject AppInfo App
+@inject NavigationManager Navigation
 
-<MudNavMenu Class="pt-2">
-    <MudNavLink Href="" Match="NavLinkMatch.All" Icon="@(CurrentView == HomeView.Coverage ? Icons.Material.Filled.FactCheck : Icons.Material.Filled.Dashboard)">@(CurrentView == HomeView.Coverage ? "Coverage" : "Dashboard")</MudNavLink>
-    <MudNavLink Href="projection" Icon="@Icons.Material.Filled.ShowChart">Running Balance</MudNavLink>
+@if (CurrentView == HomeView.Coverage)
+{
+    <nav class="coverage-nav" aria-label="Main">
+        <a href="/" class="coverage-nav-link" aria-current="@(Is("") ? "page" : null)">Overview</a>
+        <a href="/bills" class="coverage-nav-link" aria-current="@(Is("bills") ? "page" : null)">Bills</a>
+        <a href="/income" class="coverage-nav-link" aria-current="@(Is("income") ? "page" : null)">Income</a>
+        <a href="/accounts" class="coverage-nav-link" aria-current="@(Is("accounts") ? "page" : null)">Accounts</a>
+        <button type="button" class="coverage-nav-link" aria-expanded="@(_more ? "true" : "false")" aria-controls="coverage-more" @onclick="() => _more = !_more">
+            @(_more ? "Less" : "More")
+        </button>
+        <div id="coverage-more" class="coverage-nav-more" hidden="@(!_more)">
+            <p class="coverage-nav-label">Activity</p>
+            <a href="/payments" class="coverage-nav-link" aria-current="@(Is("payments") ? "page" : null)">Payments</a>
+            <a href="/transactions" class="coverage-nav-link" aria-current="@(Is("transactions") ? "page" : null)">Transactions</a>
+            <a href="/transfers" class="coverage-nav-link" aria-current="@(Is("transfers") ? "page" : null)">Transfers</a>
+            <a href="/projection" class="coverage-nav-link" aria-current="@(Is("projection") ? "page" : null)">Running balance</a>
+            <p class="coverage-nav-label">Debt</p>
+            <a href="/loans" class="coverage-nav-link" aria-current="@(Is("loans") ? "page" : null)">Loans</a>
+            <a href="/cards" class="coverage-nav-link" aria-current="@(Is("cards") ? "page" : null)">Credit cards</a>
+            <a href="/calculator" class="coverage-nav-link" aria-current="@(Is("calculator") ? "page" : null)">Amortization calculator</a>
+            <p class="coverage-nav-label">Setup</p>
+            <a href="/categories" class="coverage-nav-link" aria-current="@(Is("categories") ? "page" : null)">Categories</a>
+            <a href="/payees" class="coverage-nav-link" aria-current="@(Is("payees") ? "page" : null)">Payees</a>
+            <a href="/sharing" class="coverage-nav-link" aria-current="@(Is("sharing") ? "page" : null)">Sharing</a>
+        </div>
+    </nav>
+}
+else
+{
+    <MudNavMenu Class="pt-2">
+        <MudNavLink Href="" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.Dashboard">Dashboard</MudNavLink>
+        <MudNavLink Href="projection" Icon="@Icons.Material.Filled.ShowChart">Running Balance</MudNavLink>
 
-    <MudText Typo="Typo.overline" Class="px-4 pt-4 d-block">Money</MudText>
-    <MudNavLink Href="accounts" Icon="@Icons.Material.Filled.AccountBalance">Accounts</MudNavLink>
-    <MudNavLink Href="bills" Icon="@Icons.Material.Filled.ReceiptLong">Bills</MudNavLink>
-    <MudNavLink Href="payments" Icon="@Icons.Material.Filled.History">Payments</MudNavLink>
-    <MudNavLink Href="transactions" Icon="@Icons.Material.Filled.ShoppingBag">Transactions</MudNavLink>
-    <MudNavLink Href="income" Icon="@Icons.Material.Filled.Payments">Income</MudNavLink>
-    <MudNavLink Href="transfers" Icon="@Icons.Material.Filled.SwapHoriz">Transfers</MudNavLink>
+        <MudText Typo="Typo.overline" Class="px-4 pt-4 d-block">Money</MudText>
+        <MudNavLink Href="accounts" Icon="@Icons.Material.Filled.AccountBalance">Accounts</MudNavLink>
+        <MudNavLink Href="bills" Icon="@Icons.Material.Filled.ReceiptLong">Bills</MudNavLink>
+        <MudNavLink Href="payments" Icon="@Icons.Material.Filled.History">Payments</MudNavLink>
+        <MudNavLink Href="transactions" Icon="@Icons.Material.Filled.ShoppingBag">Transactions</MudNavLink>
+        <MudNavLink Href="income" Icon="@Icons.Material.Filled.Payments">Income</MudNavLink>
+        <MudNavLink Href="transfers" Icon="@Icons.Material.Filled.SwapHoriz">Transfers</MudNavLink>
 
-    <MudText Typo="Typo.overline" Class="px-4 pt-4 d-block">Debt</MudText>
-    <MudNavLink Href="loans" Icon="@Icons.Material.Filled.RealEstateAgent">Loans</MudNavLink>
-    <MudNavLink Href="cards" Icon="@Icons.Material.Filled.CreditCard">Credit Cards</MudNavLink>
-    <MudNavLink Href="calculator" Icon="@Icons.Material.Filled.Calculate">Amortization Calculator</MudNavLink>
+        <MudText Typo="Typo.overline" Class="px-4 pt-4 d-block">Debt</MudText>
+        <MudNavLink Href="loans" Icon="@Icons.Material.Filled.RealEstateAgent">Loans</MudNavLink>
+        <MudNavLink Href="cards" Icon="@Icons.Material.Filled.CreditCard">Credit Cards</MudNavLink>
+        <MudNavLink Href="calculator" Icon="@Icons.Material.Filled.Calculate">Amortization Calculator</MudNavLink>
 
-    <MudText Typo="Typo.overline" Class="px-4 pt-4 d-block">Organize</MudText>
-    <MudNavLink Href="categories" Icon="@Icons.Material.Filled.Label">Categories</MudNavLink>
-    <MudNavLink Href="payees" Icon="@Icons.Material.Filled.Storefront">Payees</MudNavLink>
-    <MudNavLink Href="sharing" Icon="@Icons.Material.Filled.Share">Sharing</MudNavLink>
-</MudNavMenu>
+        <MudText Typo="Typo.overline" Class="px-4 pt-4 d-block">Organize</MudText>
+        <MudNavLink Href="categories" Icon="@Icons.Material.Filled.Label">Categories</MudNavLink>
+        <MudNavLink Href="payees" Icon="@Icons.Material.Filled.Storefront">Payees</MudNavLink>
+        <MudNavLink Href="sharing" Icon="@Icons.Material.Filled.Share">Sharing</MudNavLink>
+    </MudNavMenu>
+}
 
 <MudText Typo="Typo.caption" Class="px-4 pt-6 pb-4 d-block mud-text-secondary">
     Ledgerly @App.Version@(App.IsProduction ? "" : $" · {App.Channel}")
@@ -29,4 +61,42 @@
 
 @code {
     [CascadingParameter] private HomeView CurrentView { get; set; } = HomeView.Classic;
+
+    private bool _more;
+
+    private static readonly string[] MorePaths = ["payments", "transactions", "transfers", "projection", "loans", "cards", "calculator", "categories", "payees", "sharing"];
+
+    protected override void OnInitialized()
+    {
+        _more = IsMorePath;
+        Navigation.LocationChanged += OnLocationChanged;
+    }
+
+    public void Dispose() => Navigation.LocationChanged -= OnLocationChanged;
+
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs e)
+    {
+        _more = IsMorePath;
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    private string RelativePath
+    {
+        get
+        {
+            var path = Navigation.ToBaseRelativePath(Navigation.Uri);
+            var cut = path.IndexOfAny(['?', '#']);
+            if (cut >= 0)
+                path = path[..cut];
+            return path.Trim('/');
+        }
+    }
+
+    private bool Is(string href) =>
+        href.Length == 0
+            ? RelativePath.Length == 0
+            : RelativePath.Equals(href, StringComparison.OrdinalIgnoreCase)
+                || RelativePath.StartsWith(href + "/", StringComparison.OrdinalIgnoreCase);
+
+    private bool IsMorePath => MorePaths.Any(Is);
 }

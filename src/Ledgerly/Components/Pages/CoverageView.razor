@@ -3,297 +3,171 @@
 
 <PageTitle>Coverage · Ledgerly</PageTitle>
 
-<MudStack Row="true" AlignItems="AlignItems.Start" Justify="Justify.SpaceBetween" Wrap="Wrap.Wrap" Class="mb-1">
-    <div>
+<div class="coverage-page">
+    <MudStack Row="true" AlignItems="AlignItems.Baseline" Justify="Justify.SpaceBetween">
         <MudText Typo="Typo.h4">Can I cover my bills?</MudText>
-        <MudText Typo="Typo.body2" Class="mud-text-secondary">@Ledger.Today.ToString("dddd, MMMM d, yyyy")</MudText>
-    </div>
-    <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Dashboard" OnClick="UseClassicAsync">Classic dashboard</MudButton>
-</MudStack>
+        <MudButton Variant="Variant.Text" Color="Color.Default" OnClick="UseClassicAsync">Classic view</MudButton>
+    </MudStack>
+    <MudText Typo="Typo.body2" Class="mud-text-secondary">@Ledger.Today.ToString("dddd, MMMM d")</MudText>
 
-@if (_loading || _report is null)
-{
-    <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="mt-4" />
-}
-else if (_report.CashAccounts.Count == 0 && _report.Cards.Count == 0 && _report.Gaps.Count == 0)
-{
-    <MudPaper Class="pa-8 mx-auto mt-4" MaxWidth="720px" Elevation="1">
-        <MudStack Spacing="3">
-            <MudText>Add the accounts you pay from, your paycheck, and your bills. This page then says whether each account can cover what it pays — money in a different account is not treated as available.</MudText>
-            <MudStack Row="true" Spacing="2" Wrap="Wrap.Wrap">
-                <MudButton Variant="Variant.Filled" Color="Color.Primary" Href="accounts" StartIcon="@Icons.Material.Filled.Add">Add an account</MudButton>
-                <MudButton Variant="Variant.Outlined" Href="income">Add income</MudButton>
-                <MudButton Variant="Variant.Outlined" Href="bills">Add a bill</MudButton>
-                @if (!_isSample)
-                {
-                    <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Science" OnClick="ExploreSampleAsync" Disabled="_loadingSample">Explore with sample data</MudButton>
-                }
-            </MudStack>
+    @if (_loading || _report is null)
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="mt-6" />
+    }
+    else if (_report.CashAccounts.Count == 0 && _report.Cards.Count == 0 && _report.Gaps.Count == 0)
+    {
+        <MudText Class="mt-6 mb-4">Add an account you pay bills from, then your paycheck and bills. Money in one account is not treated as available for a bill paid from another.</MudText>
+        <MudStack Row="true" Spacing="2" Wrap="Wrap.Wrap">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Href="accounts">Add an account</MudButton>
+            <MudButton Variant="Variant.Text" Href="income">Add income</MudButton>
+            <MudButton Variant="Variant.Text" Href="bills">Add a bill</MudButton>
+            @if (!_isSample)
+            {
+                <MudButton Variant="Variant.Text" OnClick="ExploreSampleAsync" Disabled="_loadingSample">Sample data</MudButton>
+            }
         </MudStack>
-    </MudPaper>
-}
-else
-{
-    var report = _report;
-    var upcoming = report.Events.Where(e => e.Date >= report.Today).ToList();
-    var earlier = report.Events.Where(e => e.Date < report.Today).ToList();
-    <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Wrap="Wrap.Wrap" Class="my-4">
-        <MudToggleGroup T="CoverageHorizon" Value="_horizon" ValueChanged="OnHorizon" Color="Color.Primary" Outlined="true" Size="Size.Small">
-            <MudToggleItem Value="@CoverageHorizon.NextPayday" Text="Until next payday" />
-            <MudToggleItem Value="@CoverageHorizon.Next30Days" Text="Next 30 days" />
-            <MudToggleItem Value="@CoverageHorizon.EndOfMonth" Text="Through month end" />
-        </MudToggleGroup>
-        <MudText Typo="Typo.body2" Class="mud-text-secondary">@WindowText(report)</MudText>
-    </MudStack>
-
-    <MudAlert Severity="@SeverityFor(report.Answer)" Class="mb-4" Variant="Variant.Outlined">
-        <MudText Typo="Typo.subtitle1">@Headline(report)</MudText>
-        <MudText Typo="Typo.body2" Class="mt-1">@Detail(report)</MudText>
-    </MudAlert>
-
-    @if (report.Payday.Clarity == PaydayClarity.Ambiguous)
-    {
-        <MudAlert Severity="Severity.Warning" Class="mb-4" Variant="Variant.Text">
-            <MudText Typo="Typo.body2" Class="mb-2">These recurring deposits are next on different days. Neither date was used as payday.</MudText>
-            @foreach (var candidate in report.Payday.Candidates)
-            {
-                <div><MudLink Href="income">@candidate.Name</MudLink> · @Display.Date(candidate.Date) · @candidate.Amount.ToString("C")</div>
-            }
-        </MudAlert>
-    }
-    else if (report.Payday.Clarity == PaydayClarity.Missing && report.Horizon == CoverageHorizon.NextPayday)
-    {
-        <MudAlert Severity="Severity.Info" Class="mb-4" Variant="Variant.Text">
-            Add recurring income, such as a paycheck, or choose 30 days or the end of the month.
-            <MudLink Href="income" Class="ml-1">Income</MudLink>
-        </MudAlert>
-    }
-
-    <MudGrid Spacing="3" Class="mb-4">
-        <MudItem xs="12" sm="6" lg="3">
-            <StatCard Label="Recorded cash" Icon="@Icons.Material.Filled.AccountBalance">
-                <Value><Money Value="report.RecordedCash" /></Value>
-                <Caption>
-                    @if (report.PostedCash != report.RecordedCash)
-                    {
-                        <span>After logged activity: @report.PostedCash.ToString("C"). </span>
-                    }
-                    Not one spending pool@(SharedNote).
-                </Caption>
-            </StatCard>
-        </MudItem>
-        <MudItem xs="12" sm="6" lg="3">
-            <StatCard Label="Expected income" Icon="@Icons.Material.Filled.Payments" Href="income">
-                <Value>
-                    @if (report.HasHorizon)
-                    {
-                        <Money Value="report.ScheduledIncome" ColorPositive="true" />
-                    }
-                    else
-                    {
-                        <MudText Typo="Typo.h5" Class="mud-text-secondary">—</MudText>
-                    }
-                </Value>
-                <Caption>@(report.HasHorizon ? "Scheduled, not recorded yet" : "Needs a horizon with an end date")</Caption>
-            </StatCard>
-        </MudItem>
-        <MudItem xs="12" sm="6" lg="3">
-            <StatCard Label="Upcoming bills" Icon="@Icons.Material.Filled.ReceiptLong" Href="bills">
-                <Value>
-                    @if (report.HasHorizon)
-                    {
-                        <Money Value="report.ScheduledBills" Colored="false" />
-                    }
-                    else
-                    {
-                        <MudText Typo="Typo.h5" Class="mud-text-secondary">—</MudText>
-                    }
-                </Value>
-                <Caption>Cash leaving the account that pays them</Caption>
-            </StatCard>
-        </MudItem>
-        <MudItem xs="12" sm="6" lg="3">
-            <StatCard Label="@(report.Answer == CoverageAnswer.Shortfall ? "First shortfall" : "Projected")" Icon="@Icons.Material.Filled.Flag" IconColor="@(report.Answer == CoverageAnswer.Shortfall ? Color.Error : Color.Primary)">
-                <Value>
-                    @if (report.EarliestShortfall is { } early && early.BalanceAtShortfall is { } at)
-                    {
-                        <Money Value="at" />
-                    }
-                    else if (report.HasHorizon && report.CashAccounts.Count > 0)
-                    {
-                        <MudText Typo="Typo.h5" Class="mud-success-text">At or above $0</MudText>
-                    }
-                    else
-                    {
-                        <MudText Typo="Typo.h5" Class="mud-text-secondary">—</MudText>
-                    }
-                </Value>
-                <Caption>@ProjectionCaption(report)</Caption>
-            </StatCard>
-        </MudItem>
-    </MudGrid>
-
-    @if (report.Answer == CoverageAnswer.Covered)
-    {
-        var warnings = report.CashAccounts.Where(a => a.BelowWarningOn is not null).ToList();
-        @if (warnings.Count > 0)
-        {
-            <MudAlert Severity="Severity.Warning" Class="mb-4" Dense="true">
-                @foreach (var account in warnings)
-                {
-                    <div>@account.Name drops under its @account.WarningAmount?.ToString("C0") warning on @Display.Date(account.BelowWarningOn!.Value). It still stays at or above $0.</div>
-                }
-            </MudAlert>
-        }
-    }
-
-    @if (report.Gaps.Count > 0)
-    {
-        <MudPaper Elevation="1" Class="pa-4 mb-4">
-            <MudText Typo="Typo.h6" Class="mb-2">Bills this can't confirm</MudText>
-            <MudStack Spacing="1">
-                @foreach (var gap in report.Gaps)
-                {
-                    <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center" Wrap="Wrap.Wrap">
-                        <MudText Typo="Typo.body2">
-                            <MudLink Href="@gap.Href">@gap.BillName</MudLink>
-                            <LedgerTag LedgerId="gap.LedgerId" />
-                            · @Display.Date(gap.DueDate) · @GapText(gap.Kind)
-                        </MudText>
-                        <Money Value="gap.Amount" Colored="false" />
-                    </MudStack>
-                }
-            </MudStack>
-        </MudPaper>
-    }
-
-    <MudText Typo="Typo.h6" Class="mb-2">Accounts</MudText>
-    <MudText Typo="Typo.body2" Class="mud-text-secondary mb-3">Recorded is what you entered. Projected applies the schedule after that date, for this account only.</MudText>
-    <MudGrid Spacing="3" Class="mb-4">
-        @foreach (var account in report.CashAccounts.OrderBy(a => !Scope.IsHome(a.LedgerId)).ThenBy(a => a.Name))
-        {
-            <MudItem xs="12" md="6">
-                <MudPaper Elevation="1" Class="pa-4" Style="@($"height:100%; {Scope.RowStyle(account.LedgerId)}")">
-                    <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
-                        <MudText Typo="Typo.subtitle1">@account.Name <LedgerTag LedgerId="account.LedgerId" /></MudText>
-                        <MudChip T="string" Size="Size.Small" Color="@AccountColor(account)">@AccountChip(account)</MudChip>
-                    </MudStack>
-                    <MudText Typo="Typo.caption" Class="mud-text-secondary mb-2">@Display.Of(account.Type) · recorded as of @Display.Date(account.BalanceAsOf)</MudText>
-                    <MudGrid Spacing="2">
-                        <MudItem xs="4">
-                            <MudText Typo="Typo.caption" Class="mud-text-secondary">Recorded</MudText>
-                            <Money Value="account.RecordedBalance" />
-                        </MudItem>
-                        <MudItem xs="4">
-                            <MudText Typo="Typo.caption" Class="mud-text-secondary">After logged</MudText>
-                            <Money Value="account.PostedBalance" />
-                        </MudItem>
-                        <MudItem xs="4">
-                            <MudText Typo="Typo.caption" Class="mud-text-secondary">Projected</MudText>
-                            @if (account.ProjectedEnding is { } ending)
-                            {
-                                <Money Value="ending" />
-                            }
-                            else
-                            {
-                                <MudText Typo="Typo.body2" Class="mud-text-secondary">—</MudText>
-                            }
-                        </MudItem>
-                    </MudGrid>
-                    @if (account.IsShort && !account.AlreadyShort && account.ShortfallItem is not null)
-                    {
-                        <MudText Typo="Typo.body2" Class="mt-3">Short on @Display.Date(account.ShortfallOn!.Value) after @account.ShortfallItem@Recovery(account).</MudText>
-                    }
-                    else if (account.AlreadyShort)
-                    {
-                        <MudText Typo="Typo.body2" Class="mt-3">Already below zero as of @Display.Date(account.BalanceAsOf), before later scheduled items.</MudText>
-                    }
-                    <MudButton Href="@account.ProjectionHref" Size="Size.Small" Class="mt-2" Color="Color.Primary">Running balance</MudButton>
-                </MudPaper>
-            </MudItem>
-        }
-    </MudGrid>
-
-    @if (report.Answer == CoverageAnswer.Shortfall)
-    {
-        <MudText Typo="Typo.h6" Class="mb-2">What leads to the shortfall</MudText>
-        @foreach (var account in report.CashAccounts.Where(a => a.IsShort))
-        {
-            <MudText Typo="Typo.subtitle2" Class="mb-1">@account.Name</MudText>
-            @if (account.AlreadyShort)
-            {
-                <MudText Typo="Typo.body2" Class="mud-text-secondary mb-3">The recorded balance is already short. Later items are not the start of it.</MudText>
-            }
-            else
-            {
-                <CoverageTimeline Items="report.Events.Where(e => e.AccountId == account.AccountId && account.ShortfallOn is { } on && e.Date <= on).ToList()" Today="report.Today" />
-            }
-        }
-    }
-
-    <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-2">
-        <MudText Typo="Typo.h6">Timeline</MudText>
-        <MudSpacer />
-        <MudButton Href="bills" Size="Size.Small">Bills</MudButton>
-        <MudButton Href="income" Size="Size.Small">Income</MudButton>
-        <MudButton Href="transfers" Size="Size.Small">Transfers</MudButton>
-        <MudButton Href="transactions" Size="Size.Small">Transactions</MudButton>
-    </MudStack>
-    @if (!report.HasHorizon)
-    {
-        <MudText Typo="Typo.body2" Class="mud-text-secondary mb-2">Nothing ahead is listed until the horizon has an end date. Logged activity through today is below.</MudText>
-    }
-    @if (upcoming.Count == 0 && report.HasHorizon)
-    {
-        <MudText Typo="Typo.body2" Class="mud-text-secondary mb-3">Nothing scheduled in this window.</MudText>
     }
     else
     {
-        <CoverageTimeline Items="upcoming" Today="report.Today" />
-    }
-    @if (earlier.Count > 0)
-    {
-        <MudExpansionPanels Class="mt-2 mb-4">
-            <MudExpansionPanel Text="@($"Already applied · {earlier.Count} before today")">
-                <MudText Typo="Typo.body2" Class="mud-text-secondary mb-2">Included because an account balance is as of an earlier day. Recorded rows were marked or logged. Scheduled rows are assumptions.</MudText>
-                <CoverageTimeline Items="earlier" Today="report.Today" />
+        var report = _report;
+        var upcoming = report.Events.Where(e => e.Date >= report.Today).ToList();
+        var earlier = report.Events.Where(e => e.Date < report.Today).ToList();
+        var warnings = report.CashAccounts.Where(a => a.BelowWarningOn is not null && !a.IsShort).ToList();
+
+        <div class="my-5">
+            <MudToggleGroup T="CoverageHorizon" Value="_horizon" ValueChanged="OnHorizon" Color="Color.Primary" Outlined="true" Size="Size.Small">
+                <MudToggleItem Value="@CoverageHorizon.NextPayday" Text="Until next payday" />
+                <MudToggleItem Value="@CoverageHorizon.Next30Days" Text="Next 30 days" />
+                <MudToggleItem Value="@CoverageHorizon.EndOfMonth" Text="Through month end" />
+            </MudToggleGroup>
+            <MudText Typo="Typo.body2" Class="mud-text-secondary mt-2">@WindowText(report)</MudText>
+        </div>
+
+        <div class="coverage-answer @AnswerClass(report.Answer)">
+            <MudText Typo="Typo.h5">@Headline(report)</MudText>
+            <MudText Typo="Typo.body1" Class="mt-2">@Detail(report)</MudText>
+            @if (report.CashAccounts.Count(a => a.IsShort) > 1)
+            {
+                <MudText Typo="Typo.body2" Class="mt-2">Also short: @string.Join(", ", report.CashAccounts.Where(a => a.IsShort && a.AccountId != report.EarliestShortfall?.AccountId).Select(a => a.Name)).</MudText>
+            }
+            <MudText Typo="Typo.body2" Class="mud-text-secondary mt-3">@AssumptionLine</MudText>
+        </div>
+
+        @if (report.Payday.Clarity == PaydayClarity.Ambiguous)
+        {
+            <div class="my-4">
+                <MudText Typo="Typo.body2" Class="mb-1">Recurring income falls on different days, so none of these was chosen as payday.</MudText>
+                @foreach (var candidate in report.Payday.Candidates)
+                {
+                    <MudText Typo="Typo.body2"><MudLink Href="income">@candidate.Name</MudLink> · @Display.Date(candidate.Date) · @candidate.Amount.ToString("C")</MudText>
+                }
+            </div>
+        }
+        else if (report.Payday.Clarity == PaydayClarity.Missing && report.Horizon == CoverageHorizon.NextPayday)
+        {
+            <MudText Typo="Typo.body2" Class="my-4">No recurring paycheck is scheduled. <MudLink Href="income">Add income</MudLink>, or choose 30 days or the end of the month.</MudText>
+        }
+
+        @if (warnings.Count > 0 && report.Answer == CoverageAnswer.Covered)
+        {
+            @foreach (var account in warnings)
+            {
+                <MudText Typo="Typo.body2" Class="my-2">@account.Name drops under its @account.WarningAmount?.ToString("C0") warning on @Display.Date(account.BelowWarningOn!.Value). It still stays at or above $0.</MudText>
+            }
+        }
+
+        @if (report.Gaps.Count > 0)
+        {
+            <div class="my-4">
+                <MudText Typo="Typo.subtitle1" Class="mb-1">Not included</MudText>
+                @foreach (var gap in report.Gaps)
+                {
+                    <MudText Typo="Typo.body2">
+                        <MudLink Href="@gap.Href">@gap.BillName</MudLink>
+                        <LedgerTag LedgerId="gap.LedgerId" />
+                        · @Display.Date(gap.DueDate) · @gap.Amount.ToString("C") · @GapText(gap.Kind)
+                    </MudText>
+                }
+            </div>
+        }
+
+        <MudText Typo="Typo.h6" Class="mt-8 mb-1">What happens</MudText>
+        @if (!report.HasHorizon)
+        {
+            <MudText Typo="Typo.body2" Class="mud-text-secondary mb-2">Nothing ahead is listed until this horizon has an end date.</MudText>
+        }
+        else if (upcoming.Count == 0)
+        {
+            <MudText Typo="Typo.body2" Class="mud-text-secondary">Nothing scheduled in this window.</MudText>
+        }
+        else
+        {
+            <CoverageTimeline Items="upcoming" Today="report.Today" />
+        }
+
+        <MudExpansionPanels Class="mt-6" Elevation="0">
+            @if (earlier.Count > 0)
+            {
+                <MudExpansionPanel Text="@($"Before today ({earlier.Count})")">
+                    <MudText Typo="Typo.body2" Class="mud-text-secondary mb-2">Counted because a balance is as of an earlier day. Logged and recorded rows happened. The others are still assumptions.</MudText>
+                    <CoverageTimeline Items="earlier" Today="report.Today" />
+                </MudExpansionPanel>
+            }
+            <MudExpansionPanel Text="Balances">
+                <MudText Typo="Typo.body2" Class="mud-text-secondary mb-2">Recorded is what you entered. After logged adds transactions and payments already marked. Projected follows the schedule for that account only.</MudText>
+                @foreach (var account in report.CashAccounts.OrderBy(a => !Scope.IsHome(a.LedgerId)).ThenBy(a => a.Name))
+                {
+                    <div class="coverage-balance" style="@Scope.RowStyle(account.LedgerId)">
+                        <MudText Typo="Typo.body1">@account.Name <LedgerTag LedgerId="account.LedgerId" /></MudText>
+                        <MudText Typo="Typo.body2" Class="mud-text-secondary">
+                            Recorded @account.RecordedBalance.ToString("C") as of @Display.Date(account.BalanceAsOf)
+                            · After logged @account.PostedBalance.ToString("C")
+                            @if (account.ProjectedEnding is { } ending)
+                            {
+                                <span> · Projected @ending.ToString("C")</span>
+                            }
+                            else
+                            {
+                                <span> · Not projected</span>
+                            }
+                        </MudText>
+                        @if (account.AlreadyShort)
+                        {
+                            <MudText Typo="Typo.body2">Already below zero as of @Display.Date(account.BalanceAsOf).</MudText>
+                        }
+                        else if (account.IsShort && account.ShortfallOn is { } on)
+                        {
+                            <MudText Typo="Typo.body2">Short on @Display.Date(on)@(account.ShortfallItem is null ? "" : $" after {account.ShortfallItem}").@Recovery(account)</MudText>
+                        }
+                        <MudLink Href="@account.ProjectionHref" Typo="Typo.body2">Running balance</MudLink>
+                    </div>
+                }
+            </MudExpansionPanel>
+            @if (report.Cards.Count > 0 || report.CardCharges.Count > 0)
+            {
+                <MudExpansionPanel Text="Credit cards">
+                    <MudText Typo="Typo.body2" Class="mud-text-secondary mb-2">A card balance is not cash. A charge does not come out of the bank account. The payment that does is in the list above, on the account that pays it.</MudText>
+                    @foreach (var card in report.Cards)
+                    {
+                        <MudText Typo="Typo.body2"><MudLink Href="@($"cards/{card.AccountId}")">@card.Name</MudLink> <LedgerTag LedgerId="card.LedgerId" /> · owed @((-card.RecordedBalance).ToString("C")) as of @Display.Date(card.BalanceAsOf)</MudText>
+                    }
+                    @foreach (var charge in report.CardCharges)
+                    {
+                        <MudText Typo="Typo.body2"><MudLink Href="@charge.Href">@charge.Name</MudLink> on @charge.CardName · @Display.Date(charge.DueDate) · @charge.Amount.ToString("C")@(charge.Estimate ? " · estimate" : "")</MudText>
+                    }
+                </MudExpansionPanel>
+            }
+            <MudExpansionPanel Text="How this is calculated">
+                <MudList T="string" Dense="true">
+                    @foreach (var line in report.Notes.Concat(CoverageReport.Assumptions))
+                    {
+                        <MudListItem>@line</MudListItem>
+                    }
+                </MudList>
             </MudExpansionPanel>
         </MudExpansionPanels>
     }
-
-    @if (report.CardCharges.Count > 0 || report.Cards.Count > 0)
-    {
-        <MudPaper Elevation="1" Class="pa-4 mb-4">
-            <MudText Typo="Typo.h6" Class="mb-1">Credit cards</MudText>
-            <MudText Typo="Typo.body2" Class="mud-text-secondary mb-2">Card balances are not cash. A charge here does not come out of the accounts above; the payment that does is listed with the account that pays it.</MudText>
-            @foreach (var card in report.Cards)
-            {
-                <MudText Typo="Typo.body2"><MudLink Href="@($"cards/{card.AccountId}")">@card.Name</MudLink> <LedgerTag LedgerId="card.LedgerId" /> · owed @((-card.RecordedBalance).ToString("C")) as of @Display.Date(card.BalanceAsOf)</MudText>
-            }
-            @foreach (var charge in report.CardCharges)
-            {
-                <MudText Typo="Typo.body2">
-                    <MudLink Href="@charge.Href">@charge.Name</MudLink> on @charge.CardName · @Display.Date(charge.DueDate) · @charge.Amount.ToString("C")@(charge.Estimate ? " · estimate" : "")
-                </MudText>
-            }
-        </MudPaper>
-    }
-
-    <MudExpansionPanels Class="mb-2">
-        <MudExpansionPanel Text="How this is calculated">
-            <MudList T="string" Dense="true">
-                @foreach (var line in report.Notes)
-                {
-                    <MudListItem Icon="@Icons.Material.Filled.Info">@line</MudListItem>
-                }
-                @foreach (var line in CoverageReport.Assumptions)
-                {
-                    <MudListItem>@line</MudListItem>
-                }
-            </MudList>
-        </MudExpansionPanel>
-    </MudExpansionPanels>
-}
+</div>
 
 @code {
     [CascadingParameter] private LedgerScope Scope { get; set; } = LedgerScope.None;
@@ -310,8 +184,6 @@ else
     private List<Income> _incomes = [];
     private List<Transfer> _transfers = [];
     private List<Transaction> _transactions = [];
-
-    private string SharedNote => Scope.HasVisibleShared ? ", including shared ledgers that are switched on" : "";
 
     protected override async Task OnInitializedAsync()
     {
@@ -350,73 +222,57 @@ else
 
     private static string WindowText(CoverageReport report) => report.Through is { } end
         ? $"Through {Display.Date(end)}, including that day."
-        : "No end date — payday isn't a single scheduled day.";
+        : "No end date. Payday is not a single scheduled day.";
 
     private static string Headline(CoverageReport report)
     {
         if (report.Answer == CoverageAnswer.Shortfall && report.EarliestShortfall is { } account)
         {
             if (account.AlreadyShort)
-                return $"{account.Name} is already short as of {Display.Date(account.BalanceAsOf)}.";
-            return $"{account.Name} goes short on {Display.Date(account.ShortfallOn!.Value)}.";
+                return $"No. {account.Name} is already short as of {Display.Date(account.BalanceAsOf)}.";
+            return $"No. {account.Name} goes short on {Display.Date(account.ShortfallOn!.Value)}.";
         }
         if (report.Answer == CoverageAnswer.Covered && report.Through is { } through)
-            return $"Yes. Every bill's account stays at or above $0 through {Display.Date(through)}.";
+            return $"Yes. Bills are covered through {Display.Date(through)}.";
         if (!report.HasHorizon && report.Payday.Clarity == PaydayClarity.Ambiguous)
-            return "Payday isn't one date, so this won't say the bills are covered.";
+            return "Payday is not one date, so this will not say the bills are covered.";
         if (!report.HasHorizon && report.Payday.Clarity == PaydayClarity.Missing)
-            return "There's no payday on the schedule to check against.";
+            return "There is no payday to check against.";
         if (report.CashAccounts.Count == 0 && report.Cards.Count == 0)
             return "Add an account to see whether upcoming bills are covered.";
-        return "This can't say yes yet.";
+        return "This cannot say yes yet.";
     }
 
     private static string Detail(CoverageReport report)
     {
         if (report.Answer == CoverageAnswer.Shortfall && report.EarliestShortfall is { } account && !account.AlreadyShort && account.ShortfallItem is not null)
-            return $"{account.ShortfallItem} takes {account.Name} to {account.BalanceAtShortfall:C}. Money in another account is not counted unless a transfer moves it first.{Recovery(account)}";
+            return $"{account.ShortfallItem}, paid from {account.Name}, takes that account to {account.BalanceAtShortfall:C}. Money in another account is not counted unless a transfer moves it first.{Recovery(account)}";
         if (report.Answer == CoverageAnswer.Shortfall && report.EarliestShortfall is { AlreadyShort: true })
-            return "That balance was already below zero on its as-of date. Upcoming items are not what made it short.";
+            return "That balance was already below zero on its as-of date. Later items are not what made it short.";
         if (report.Answer == CoverageAnswer.Covered)
-            return "This uses expected amounts. A bill is covered only by the account that pays it.";
+            return "Each bill is covered only by the account that pays it. Every one of those accounts stays at or above $0.";
         if (report.Gaps.Count > 0)
-            return "Those bills are left out of the balances below, so a positive result would be incomplete.";
-        return "Choose 30 days or the end of the month to look ahead, or add the missing income.";
+            return "Some bills have no usable account, so they are left out. A yes would be incomplete.";
+        return "Choose 30 days or the end of the month, or add the missing income.";
     }
 
-    private static string ProjectionCaption(CoverageReport report)
-    {
-        if (report.EarliestShortfall is { } early && early.ShortfallOn is { } on)
-            return early.AlreadyShort ? $"Recorded on {Display.ShortDate(early.BalanceAsOf)}" : $"{early.ShortfallItem} · {Display.ShortDate(on)}";
-        return report.HasHorizon ? "No cash account goes below zero" : "Not a forecast";
-    }
+    private string AssumptionLine =>
+        "Projected from expected amounts, not money already recorded." + (Scope.HasVisibleShared ? " Shared ledgers that are switched on are included." : "");
 
     private static string Recovery(AccountSnapshot account) =>
         account.RecoversOn is { } on ? $" Back above zero on {Display.Date(on)}." : "";
 
-    private static string AccountChip(AccountSnapshot account) =>
-        account.AlreadyShort ? "Already short"
-        : account.IsShort ? "Goes short"
-        : account.BalanceDatedAfterToday ? "Dated ahead"
-        : account.ProjectedEnding is null ? "Not forecast"
-        : "Stays positive";
-
-    private static Color AccountColor(AccountSnapshot account) =>
-        account.IsShort ? Color.Error
-        : account.BalanceDatedAfterToday || account.ProjectedEnding is null ? Color.Default
-        : Color.Success;
-
     private static string GapText(CoverageGapKind kind) => kind switch
     {
         CoverageGapKind.BillWithoutAccount => "no account pays this",
-        CoverageGapKind.BillAccountUnavailable => "the account that pays this isn't available",
+        CoverageGapKind.BillAccountUnavailable => "the account that pays this is not available",
         _ => "paid from an account whose balance is dated after today"
     };
 
-    private static Severity SeverityFor(CoverageAnswer answer) => answer switch
+    private static string AnswerClass(CoverageAnswer answer) => answer switch
     {
-        CoverageAnswer.Covered => Severity.Success,
-        CoverageAnswer.Shortfall => Severity.Error,
-        _ => Severity.Warning
+        CoverageAnswer.Covered => "coverage-answer-ok",
+        CoverageAnswer.Shortfall => "coverage-answer-short",
+        _ => "coverage-answer-unknown"
     };
 }

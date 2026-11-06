@@ -166,6 +166,10 @@
             </MudAlert>
         }
         <MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="py-6">
+            @if (_homeView == HomeView.Coverage && !IsOverview)
+            {
+                <a href="/" class="coverage-back">Overview</a>
+            }
             @* Re-keyed after a quick-add or a sharing change so the page underneath reloads its data. *@
             <CascadingValue Value="_scope">
                 <CascadingValue Name="RefreshLedgers" Value="_refreshLedgers">
@@ -231,6 +235,7 @@
 
     protected override async Task OnInitializedAsync()
     {
+        Navigation.LocationChanged += OnLocationChanged;
         // Pages that change sharing (the Sharing page) call this so the Ledgers menu and the page reload.
         _refreshLedgers = async () =>
         {
@@ -263,7 +268,25 @@
         await PromptInvitationsAsync();
     }
 
-    public void Dispose() => Notifier.Changed -= OnSharingChanged;
+    public void Dispose()
+    {
+        Notifier.Changed -= OnSharingChanged;
+        Navigation.LocationChanged -= OnLocationChanged;
+    }
+
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs e) => _ = InvokeAsync(StateHasChanged);
+
+    private bool IsOverview
+    {
+        get
+        {
+            var path = Navigation.ToBaseRelativePath(Navigation.Uri);
+            var cut = path.IndexOfAny(['?', '#']);
+            if (cut >= 0)
+                path = path[..cut];
+            return path.Trim('/') == "";
+        }
+    }
 
     private async Task LoadSharingAsync()
     {
